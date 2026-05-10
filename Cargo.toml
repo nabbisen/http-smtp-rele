@@ -1,15 +1,20 @@
+[workspace]
+members = [".", "crates/cli"]
+resolver = "2"
+
 [package]
 name = "http-smtp-rele"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["nabbisen"]
 license = "Apache-2.0"
 description = "Minimal, secure HTTP-to-SMTP submission relay"
 repository = "https://github.com/nabbisen/http-smtp-rele"
 
-[[bin]]
-name = "http-smtp-rele"
-path = "src/main.rs"
+
+[lib]
+name = "http_smtp_rele"
+path = "src/lib.rs"
 
 [dependencies]
 axum            = "0.8"
@@ -30,11 +35,13 @@ uuid            = { version = "1", features = ["v4"] }
 anyhow          = "1"
 arc-swap        = "1"
 prometheus      = { version = "0.13", default-features = false }
+base64          = "0.22"
 
 [target.'cfg(target_os = "openbsd")'.dependencies]
 libc            = "0.2"
 
 [dev-dependencies]
+base64 = "0.22"
 tokio           = { version = "1", features = ["full"] }
 tower           = { version = "0.5", features = ["limit"] }
 http-body-util  = "0.1"

@@ -35,6 +35,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.5.0] — 2026-05-10
+
+### Added
+
+**Cargo workspace split (RFC 501)**
+- Root package is now the pure library crate (`http-smtp-rele`)
+- `crates/cli/` is the binary package (`http-smtp-rele-cli`) producing the `http-smtp-rele` binary
+- Workspace shares a single `target/` directory (no redundant builds)
+- Integration tests in `tests/` remain in the root library package — no imports changed
+- `lib.rs` visible without `[[bin]]` coupling
+
+**Attachment support (RFC 502)**
+- `attachments: Option<Vec<AttachmentSpec>>` field in `POST /v1/send`
+- Each attachment: `filename` (no path separators), `content_type` (MIME), `data` (base64)
+- Base64 decoded and validated: size ≤ `mail.max_attachment_bytes` (default 10 MiB)
+- Count checked against `mail.max_attachments` (default 5)
+- MIME structure: `multipart/mixed` wrapping the body part when attachments present
+- New dependency: `base64 = "0.22"`
+
+**reply_to array (RFC 503)**
+- `reply_to` now accepts a JSON string or array (consistent with `to`/`cc`)
+- Validated by the same `Recipients` deserializer
+- lettre: `.reply_to()` called for each validated address
+- `ValidatedMailRequest.reply_to` changed from `Option<String>` to `Vec<String>`
+
+**Prometheus full instrumentation (RFC 504)**
+- Auth failures now increment `rele_auth_failures_total{reason}`:
+  - `missing_token` — no Authorization header
+  - `invalid_token` — token not matched
+  - `disabled_key` — matched key but disabled
+- Rate limit hits now increment `rele_rate_limited_total{tier}` by `global`/`ip`/`key`
+- Validation failures now increment `rele_validation_failures_total{field}`
+- All rejection paths also increment `rele_requests_total{status="4xx"}`
+
+### Changed
+
+- `MailConfig` gains `max_attachments` (default 5) and `max_attachment_bytes` (default 10 MiB)
+- `ValidatedMailRequest.reply_to` type changed from `Option<String>` to `Vec<String>`
+- `MailRequest.reply_to` type changed from `Option<String>` to `Option<Recipients>`
+
+---
+
 ## [0.4.0] — 2026-05-10
 
 ### Added
@@ -119,6 +161,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
 - `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
 - `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.5.0] — 2026-05-10
+
+### Added
+
+**Cargo workspace split (RFC 501)**
+- Root package is now the pure library crate (`http-smtp-rele`)
+- `crates/cli/` is the binary package (`http-smtp-rele-cli`) producing the `http-smtp-rele` binary
+- Workspace shares a single `target/` directory (no redundant builds)
+- Integration tests in `tests/` remain in the root library package — no imports changed
+- `lib.rs` visible without `[[bin]]` coupling
+
+**Attachment support (RFC 502)**
+- `attachments: Option<Vec<AttachmentSpec>>` field in `POST /v1/send`
+- Each attachment: `filename` (no path separators), `content_type` (MIME), `data` (base64)
+- Base64 decoded and validated: size ≤ `mail.max_attachment_bytes` (default 10 MiB)
+- Count checked against `mail.max_attachments` (default 5)
+- MIME structure: `multipart/mixed` wrapping the body part when attachments present
+- New dependency: `base64 = "0.22"`
+
+**reply_to array (RFC 503)**
+- `reply_to` now accepts a JSON string or array (consistent with `to`/`cc`)
+- Validated by the same `Recipients` deserializer
+- lettre: `.reply_to()` called for each validated address
+- `ValidatedMailRequest.reply_to` changed from `Option<String>` to `Vec<String>`
+
+**Prometheus full instrumentation (RFC 504)**
+- Auth failures now increment `rele_auth_failures_total{reason}`:
+  - `missing_token` — no Authorization header
+  - `invalid_token` — token not matched
+  - `disabled_key` — matched key but disabled
+- Rate limit hits now increment `rele_rate_limited_total{tier}` by `global`/`ip`/`key`
+- Validation failures now increment `rele_validation_failures_total{field}`
+- All rejection paths also increment `rele_requests_total{status="4xx"}`
+
+### Changed
+
+- `MailConfig` gains `max_attachments` (default 5) and `max_attachment_bytes` (default 10 MiB)
+- `ValidatedMailRequest.reply_to` type changed from `Option<String>` to `Vec<String>`
+- `MailRequest.reply_to` type changed from `Option<String>` to `Option<Recipients>`
 
 ---
 

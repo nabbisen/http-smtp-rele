@@ -55,6 +55,26 @@ impl<'de> serde::Deserialize<'de> for Recipients {
     }
 }
 
+/// A single attachment as supplied in the JSON request body (RFC 502).
+#[derive(Debug, Deserialize)]
+pub struct AttachmentSpec {
+    /// Display filename (e.g. `report.pdf`). No path separators allowed.
+    pub filename: String,
+    /// MIME content-type (e.g. `application/pdf`).
+    pub content_type: String,
+    /// Base64-encoded file content.
+    pub data: String,
+}
+
+/// A validated, decoded attachment ready for inclusion in the mail message.
+#[derive(Debug, Clone)]
+pub struct ValidatedAttachment {
+    pub filename: String,
+    pub content_type: String,
+    pub decoded: Vec<u8>,
+}
+
+
 /// Raw mail request as received from the HTTP client.
 ///
 /// `deny_unknown_fields` ensures that any field not listed here (e.g., `from`,
@@ -66,11 +86,14 @@ pub struct MailRequest {
     pub subject: String,
     pub body: String,
     pub from_name: Option<String>,
-    pub reply_to: Option<String>,
+    /// Reply-To address(es): string or array (RFC 503).
+    pub reply_to: Option<Recipients>,
     /// Optional HTML body. Combined with `body` to create multipart/alternative (RFC 403).
     pub body_html: Option<String>,
     /// Optional CC recipients (string or array, RFC 404).
     pub cc: Option<Recipients>,
+    /// File attachments (RFC 502). Each entry is base64-encoded.
+    pub attachments: Option<Vec<AttachmentSpec>>,
     /// Opaque client metadata (logged for correlation; not reflected in mail).
     pub metadata: Option<serde_json::Value>,
 }
@@ -89,9 +112,10 @@ pub struct ValidatedMailRequest {
     pub subject: String,
     pub body: String,
     pub from_name: Option<String>,
-    pub reply_to: Option<String>,
+    pub reply_to: Vec<String>,
     pub body_html: Option<String>,
     pub cc: Vec<String>,
+    pub attachments: Vec<ValidatedAttachment>,
     pub client_request_id: Option<String>,
 }
 
@@ -186,12 +210,17 @@ pub fn validate_mail_request(
         .map(|n| validate_display_name(n, "from_name"))
         .transpose()?;
 
-    // 5. `reply_to` (optional)
-    let reply_to = req
-        .reply_to
-        .as_deref()
-        .map(|a| validate_email_address(a, "reply_to"))
-        .transpose()?;
+    // 5. `reply_to` (optional, string or array — RFC 503)
+    let reply_to: Vec<String> = if let Some(recipients) = req.reply_to {
+        let addrs = recipients.0;
+        for addr in &addrs {
+            validate_email_address(addr, "reply_to")?;
+            sanitize::reject_header_crlf("reply_to", addr)?;
+        }
+        addrs
+    } else {
+        vec![]
+    };
 
     // 6. client request_id from metadata
     let client_request_id = req
@@ -201,6 +230,53 @@ pub fn validate_mail_request(
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
+    // 7. Attachments (RFC 502)
+    let attachments: Vec<ValidatedAttachment> = {
+        use base64::Engine as _;
+        let specs = req.attachments.unwrap_or_default();
+        if specs.len() > mail_cfg.max_attachments {
+            return Err(AppError::Validation(format!(
+                "attachments: too many (max {})", mail_cfg.max_attachments
+            )));
+        }
+        let mut validated = Vec::with_capacity(specs.len());
+        for spec in specs {
+            // Filename safety
+            if spec.filename.is_empty() || spec.filename.len() > 255 {
+                return Err(AppError::Validation("attachments[].filename: must be 1–255 chars".into()));
+            }
+            if spec.filename.contains('/') || spec.filename.contains('\\') || spec.filename.contains(' ') {
+                return Err(AppError::Validation("attachments[].filename: path separators not allowed".into()));
+            }
+            sanitize::reject_header_crlf("attachments[].filename", &spec.filename)?;
+
+            // Content-type: basic non-empty check
+            if spec.content_type.is_empty() || !spec.content_type.contains('/') {
+                return Err(AppError::Validation("attachments[].content_type: must be a valid MIME type".into()));
+            }
+
+            // Decode base64
+            let decoded = base64::engine::general_purpose::STANDARD
+                .decode(&spec.data)
+                .map_err(|_| AppError::Validation("attachments[].data: invalid base64".into()))?;
+
+            // Size check
+            if decoded.len() > mail_cfg.max_attachment_bytes {
+                return Err(AppError::Validation(format!(
+                    "attachments[].data: decoded size {} exceeds maximum {}",
+                    decoded.len(), mail_cfg.max_attachment_bytes
+                )));
+            }
+
+            validated.push(ValidatedAttachment {
+                filename: spec.filename,
+                content_type: spec.content_type,
+                decoded,
+            });
+        }
+        validated
+    };
+
     Ok(ValidatedMailRequest {
         to,
         subject,
@@ -209,6 +285,7 @@ pub fn validate_mail_request(
         from_name,
         reply_to,
         cc,
+        attachments,
         client_request_id,
     })
 }
@@ -410,6 +487,8 @@ mod tests {
                 max_subject_chars: 200,
                 max_body_bytes: 1_000_000,
                 max_recipients: 10,
+                max_attachments: 5,
+                max_attachment_bytes: 10 * 1024 * 1024,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),
@@ -449,6 +528,7 @@ mod tests {
             reply_to: None,
             body_html: None,
             cc: None,
+            attachments: None,
             metadata: None,
         }
     }
@@ -605,7 +685,7 @@ Bcc: evil@evil.com",
 X-Header: injected",
         ] {
             let req = MailRequest {
-                reply_to: Some(bad.to_string()),
+                reply_to: Some(crate::validation::Recipients(vec![bad.to_string()])),
                 ..minimal_request()
             };
             assert!(

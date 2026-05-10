@@ -11,8 +11,7 @@
 //! `config.mail.default_from_name`.
 
 use lettre::{
-    message::{header::ContentType, Mailbox},
-    Message,
+    message::{Attachment, header::ContentType, Mailbox, Message, MultiPart, SinglePart},
 };
 use tracing::error;
 
@@ -70,37 +69,55 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
         builder = builder.cc(cc_mailbox);
     }
 
-    // Reply-To (optional).
-    if let Some(reply_to) = validated.reply_to.as_deref() {
-        let rt_mailbox: Mailbox = reply_to
+    // Reply-To addresses (optional, string or array — RFC 503).
+    for reply_to_addr in &validated.reply_to {
+        let rt_mailbox: Mailbox = reply_to_addr
             .parse()
             .map_err(|e| {
-                error!(error = %e, "invalid reply_to after validation");
+                error!(error = %e, addr = %reply_to_addr, "invalid reply_to after validation");
                 AppError::Internal
             })?;
         builder = builder.reply_to(rt_mailbox);
     }
 
-    // Body: plain text only, or multipart/alternative with HTML (RFC 403).
-    let message = if let Some(ref html) = validated.body_html {
-        use lettre::message::{MultiPart, SinglePart};
-        builder
-            .multipart(
-                MultiPart::alternative()
-                    .singlepart(SinglePart::plain(validated.body.clone()))
-                    .singlepart(SinglePart::html(html.clone())),
-            )
-            .map_err(|e| {
-                error!(error = %e, "failed to build multipart mail message");
-                AppError::Internal
-            })?
+    // Body part: plain text only, or multipart/alternative if HTML present (RFC 403).
+    let body_part = if let Some(ref html) = validated.body_html {
+        MultiPart::alternative()
+            .singlepart(SinglePart::plain(validated.body.clone()))
+            .singlepart(SinglePart::html(html.clone()))
     } else {
+        MultiPart::alternative()
+            .singlepart(SinglePart::plain(validated.body.clone()))
+    };
+
+    // Compose final message (RFC 502: wrap in multipart/mixed when attachments present).
+    let message = if validated.attachments.is_empty() && validated.body_html.is_none() {
+        // Simplest case: plain text only
         builder
             .body(validated.body.clone())
-            .map_err(|e| {
-                error!(error = %e, "failed to build plain text mail message");
-                AppError::Internal
-            })?
+            .map_err(|e| { error!(error = %e, "failed to build plain message"); AppError::Internal })?
+    } else if validated.attachments.is_empty() {
+        // No attachments, but has HTML → multipart/alternative
+        builder
+            .multipart(body_part)
+            .map_err(|e| { error!(error = %e, "failed to build alt message"); AppError::Internal })?
+    } else {
+        // Attachments present → multipart/mixed wrapping the body part
+        let mut mixed = MultiPart::mixed().multipart(body_part);
+        for att in &validated.attachments {
+            let content_type = att.content_type
+                .parse::<lettre::message::header::ContentType>()
+                .map_err(|e| {
+                    error!(error = %e, content_type = %att.content_type, "invalid content_type");
+                    AppError::Internal
+                })?;
+            mixed = mixed.singlepart(
+                Attachment::new(att.filename.clone()).body(att.decoded.clone(), content_type)
+            );
+        }
+        builder
+            .multipart(mixed)
+            .map_err(|e| { error!(error = %e, "failed to build mixed message"); AppError::Internal })?
     };
 
     Ok(message)
@@ -153,6 +170,8 @@ mod tests {
                 max_subject_chars: 200,
                 max_body_bytes: 1_000_000,
                 max_recipients: 10,
+                max_attachments: 5,
+                max_attachment_bytes: 10 * 1024 * 1024,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),
@@ -189,9 +208,10 @@ mod tests {
             subject: "Hello".into(),
             body: "Test body.".into(),
             from_name: None,
-            reply_to: None,
+            reply_to: vec![],
             body_html: None,
             cc: vec![],
+            attachments: vec![],
             client_request_id: None,
         }
     }
@@ -228,7 +248,7 @@ mod tests {
     fn reply_to_applied_when_present() {
         let cfg = minimal_config();
         let v = ValidatedMailRequest {
-            reply_to: Some("support@example.com".into()),
+            reply_to: vec!["support@example.com".into()],
             ..minimal_validated()
         };
         let msg = build_message(&v, &cfg).unwrap();

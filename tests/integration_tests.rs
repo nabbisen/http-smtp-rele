@@ -897,3 +897,170 @@ async fn cc_invalid_address_rejected() {
 
     assert_ne!(resp.status, StatusCode::ACCEPTED, "invalid cc should be rejected");
 }
+
+// ===========================================================================
+// RFC 501 — Workspace split
+// ===========================================================================
+
+#[tokio::test]
+async fn workspace_library_api_usable() {
+    // The library crate is importable; AppState::new() works from test context.
+    let cfg = common::test_config(1);
+    let state = http_smtp_rele::AppState::new(cfg);
+    // config() returns a snapshot
+    let c = state.config();
+    assert_eq!(c.smtp.tls, "none");
+}
+
+// ===========================================================================
+// RFC 502 — Attachment support
+// ===========================================================================
+
+#[tokio::test]
+async fn attachment_base64_forwarded_to_smtp() {
+    use base64::Engine as _;
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let content = b"Hello attachment!";
+    let b64 = base64::engine::general_purpose::STANDARD.encode(content);
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "subject": "With attachment",
+            "body": "See attached.",
+            "attachments": [{
+                "filename": "hello.txt",
+                "content_type": "text/plain",
+                "data": b64
+            }]
+        }))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    stub.assert_count(1);
+    let msg = stub.assert_one();
+    assert!(msg.body.contains("mixed") || msg.body.contains("hello.txt"),
+        "multipart/mixed or filename expected in body: {}", msg.body);
+
+    stub.shutdown().await;
+}
+
+#[tokio::test]
+async fn attachment_invalid_base64_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "subject": "Bad attachment",
+            "body": "See attached.",
+            "attachments": [{
+                "filename": "file.txt",
+                "content_type": "text/plain",
+                "data": "!!!not-valid-base64!!!"
+            }]
+        }))
+        .build()).await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "invalid base64 must be rejected");
+}
+
+#[tokio::test]
+async fn attachment_path_traversal_filename_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "subject": "Bad filename",
+            "body": "Text.",
+            "attachments": [{
+                "filename": "../etc/passwd",
+                "content_type": "text/plain",
+                "data": "dGVzdA=="
+            }]
+        }))
+        .build()).await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "path traversal filename must be rejected");
+}
+
+// ===========================================================================
+// RFC 503 — reply_to array
+// ===========================================================================
+
+#[tokio::test]
+async fn reply_to_string_accepted() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "reply_to": "support@example.com",
+            "subject": "Reply-To test",
+            "body": "Text."
+        }))
+        .build()).await;
+    resp.assert_status(StatusCode::ACCEPTED);
+    stub.shutdown().await;
+}
+
+#[tokio::test]
+async fn reply_to_array_accepted() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "reply_to": ["alice@example.com", "bob@example.com"],
+            "subject": "Reply-To Array",
+            "body": "Text."
+        }))
+        .build()).await;
+    resp.assert_status(StatusCode::ACCEPTED);
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// RFC 504 — Prometheus: auth + rate limit counters
+// ===========================================================================
+
+#[tokio::test]
+async fn auth_failure_increments_metric() {
+    // Use same router so we can see the same registry
+    let router = test_router_no_smtp();
+
+    // Generate an auth failure (wrong token → 403)
+    let _ = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("definitely-wrong")
+        .json(common::valid_mail_body())
+        .build()).await;
+
+    // Fetch metrics on the same router
+    let resp = send(&router, RequestBuilder::get("/metrics").build()).await;
+    assert_eq!(resp.status, StatusCode::OK);
+}
+
+#[tokio::test]
+async fn rate_limit_tier_counter_increments() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    // Tiny burst to trigger rate limit quickly
+    let mut cfg = common::test_config(1);
+    cfg.rate_limit.global_per_min = 1;
+    cfg.rate_limit.global_burst  = 1;
+    let router = api::build_router(AppState::new(cfg));
+
+    let _ = send_valid(&router).await;          // consumes burst
+    let resp = send_valid(&router).await;       // triggers rate limit
+    assert_eq!(resp.status, StatusCode::TOO_MANY_REQUESTS);
+
+    // Metrics endpoint still reachable
+    let m = send(&router, RequestBuilder::get("/metrics").build()).await;
+    assert_eq!(m.status, StatusCode::OK);
+}

@@ -102,6 +102,8 @@ where
             Some(t) => t,
             None => {
                 warn!(client_ip = %client_ip, "auth: missing or malformed token");
+                app_state.metrics.inc_auth_failure("missing_token");
+                app_state.metrics.inc_request("4xx");
                 return Err(unauthorized());
             }
         };
@@ -112,15 +114,15 @@ where
         match find_matching_key(&security.api_keys, token) {
             MatchResult::Matched(key_id, key_rate_limit_per_min, key_burst) => Ok(AuthContext { key_id, client_ip, key_rate_limit_per_min, key_burst }),
             MatchResult::Disabled(key_id) => {
-                warn!(
-                    client_ip = %client_ip,
-                    key_id = %key_id,
-                    "auth: key is disabled"
-                );
+                warn!(client_ip = %client_ip, key_id = %key_id, "auth: key is disabled");
+                app_state.metrics.inc_auth_failure("disabled_key");
+                app_state.metrics.inc_request("4xx");
                 Err(forbidden())
             }
             MatchResult::NotFound => {
                 warn!(client_ip = %client_ip, "auth: token not matched");
+                app_state.metrics.inc_auth_failure("invalid_token");
+                app_state.metrics.inc_request("4xx");
                 Err(forbidden())
             }
         }

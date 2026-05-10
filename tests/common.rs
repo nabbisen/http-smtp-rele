@@ -81,6 +81,8 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             max_subject_chars: 255,
             max_body_bytes: 65536,
             max_recipients: 10,
+            max_attachments: 5,
+            max_attachment_bytes: 10 * 1024 * 1024,
         },
         smtp: SmtpConfig {
             mode: "smtp".into(),

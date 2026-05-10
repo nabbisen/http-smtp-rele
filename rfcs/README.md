@@ -36,6 +36,16 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 403 | [HTML Body](./done/403-html-body.md) |
 | 404 | [cc Recipients](./done/404-cc-recipients.md) |
 
+### v0.5 Features
+
+| ID  | Title |
+|-----|-------|
+| 500 | [v0.5 Development Plan](./done/500-v05-development-plan.md) |
+| 501 | [Cargo Workspace Split](./done/501-workspace-split.md) |
+| 502 | [Attachment Support](./done/502-attachments.md) |
+| 503 | [reply\_to Array](./done/503-reply-to-array.md) |
+| 504 | [Prometheus: Full Instrumentation](./done/504-prometheus-full.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |

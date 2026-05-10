@@ -41,7 +41,7 @@ Core HTTP-to-SMTP relay with security hardening.
 - Multiple `cc` recipients (array, same validation pipeline as `to`)
 - OpenBSD: SIGHUP reload with `rpath` pledge re-application
 
-## v0.5 — Planned
+## v0.5.0 — Shipped (2026-05-10)
 
 - Cargo workspace split (`http-smtp-rele-core` library crate + `http-smtp-rele` binary)
 - Attachment support (base64-encoded in JSON, MIME size-limited)
@@ -49,3 +49,11 @@ Core HTTP-to-SMTP relay with security hardening.
 - OpenBSD SIGHUP reload with `rpath` pledge re-application window
 - Prometheus: auth failure and rate limit counters wired to middleware layers
 - `reply_to` array support (multiple Reply-To addresses)
+
+## v0.6 — Planned
+
+- OpenBSD SIGHUP reload with `rpath` pledge re-application window
+- Bulk send endpoint (`POST /v1/send-bulk`) with per-message parallelism cap
+- Webhook delivery: `POST /v1/send` webhook mode (HTTP instead of SMTP)
+- Per-key logging mask policy (`mask_recipient` override per API key)
+- Admin `GET /v1/keys` read-only key status endpoint

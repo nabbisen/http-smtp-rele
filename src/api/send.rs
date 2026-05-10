@@ -37,12 +37,16 @@ pub async fn send_mail(
 ) -> Result<(StatusCode, Json<Value>), AppError> {
     // 3a. Global rate limit — all requests regardless of identity (RFC 072).
     state.rate_limiter.check_global().map_err(|e| {
+        state.metrics.inc_rate_limited("global");
+        state.metrics.inc_request("4xx");
         tracing::warn!(event = "rate_limited", tier = "global", retry_after = e.retry_after_secs);
         AppError::RateLimited { retry_after_secs: Some(e.retry_after_secs) }
     })?;
 
     // 3b. Per-IP rate limit (RFC 072).
     state.rate_limiter.check_ip(auth.client_ip).map_err(|e| {
+        state.metrics.inc_rate_limited("ip");
+        state.metrics.inc_request("4xx");
         tracing::warn!(event = "rate_limited", tier = "ip", client_ip = %auth.client_ip, retry_after = e.retry_after_secs);
         AppError::RateLimited { retry_after_secs: Some(e.retry_after_secs) }
     })?;
@@ -52,6 +56,8 @@ pub async fn send_mail(
         .rate_limiter
         .check_key(&auth.key_id, auth.key_rate_limit_per_min, auth.key_burst)
         .map_err(|e| {
+            state.metrics.inc_rate_limited("key");
+            state.metrics.inc_request("4xx");
             tracing::warn!(
                 event = "rate_limited",
                 tier = "key",
@@ -67,6 +73,8 @@ pub async fn send_mail(
     let cfg = state.config();
     let validated = validation::validate_mail_request(payload, &cfg, &auth)
         .map_err(|e| {
+            state.metrics.inc_validation_failure("request");
+            state.metrics.inc_request("4xx");
             tracing::warn!(
                 event = "validation_failure",
                 key_id = %auth.key_id,

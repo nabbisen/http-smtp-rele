@@ -160,6 +160,12 @@ pub struct MailConfig {
     /// Maximum number of recipients per request. Default 10.
     #[serde(default = "default_max_recipients")]
     pub max_recipients: usize,
+    /// Maximum number of attachments per request (RFC 502).
+    #[serde(default = "default_max_attachments")]
+    pub max_attachments: usize,
+    /// Maximum decoded size per attachment in bytes (RFC 502). Default 10 MiB.
+    #[serde(default = "default_max_attachment_bytes")]
+    pub max_attachment_bytes: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -268,6 +274,8 @@ fn default_per_ip_per_min() -> u32 { 20 }
 #[allow(dead_code)]
 fn default_burst_size() -> u32 { 5 }
 fn default_max_recipients() -> usize { 10 }
+fn default_max_attachments() -> usize { 5 }
+fn default_max_attachment_bytes() -> usize { 10 * 1024 * 1024 } // 10 MiB
 fn default_pipe_command() -> String { "/usr/sbin/sendmail".into() }
 fn default_smtp_tls() -> String { "none".into() }
 fn default_global_burst() -> u32 { 10 }
