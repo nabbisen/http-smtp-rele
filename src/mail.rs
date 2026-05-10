@@ -61,6 +61,15 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
         .subject(validated.subject.clone())
         .header(ContentType::TEXT_PLAIN);
 
+    // CC addresses (RFC 404).
+    for addr in &validated.cc {
+        let cc_mailbox: Mailbox = addr.parse().map_err(|e| {
+            error!(error = %e, addr = %addr, "invalid cc address after validation");
+            AppError::Internal
+        })?;
+        builder = builder.cc(cc_mailbox);
+    }
+
     // Reply-To (optional).
     if let Some(reply_to) = validated.reply_to.as_deref() {
         let rt_mailbox: Mailbox = reply_to
@@ -72,12 +81,27 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
         builder = builder.reply_to(rt_mailbox);
     }
 
-    let message = builder
-        .body(validated.body.clone())
-        .map_err(|e| {
-            error!(error = %e, "failed to build mail message");
-            AppError::Internal
-        })?;
+    // Body: plain text only, or multipart/alternative with HTML (RFC 403).
+    let message = if let Some(ref html) = validated.body_html {
+        use lettre::message::{MultiPart, SinglePart};
+        builder
+            .multipart(
+                MultiPart::alternative()
+                    .singlepart(SinglePart::plain(validated.body.clone()))
+                    .singlepart(SinglePart::html(html.clone())),
+            )
+            .map_err(|e| {
+                error!(error = %e, "failed to build multipart mail message");
+                AppError::Internal
+            })?
+    } else {
+        builder
+            .body(validated.body.clone())
+            .map_err(|e| {
+                error!(error = %e, "failed to build plain text mail message");
+                AppError::Internal
+            })?
+    };
 
     Ok(message)
 }
@@ -139,6 +163,7 @@ mod tests {
                 auth_user: None,
                 auth_password: None,
                 pipe_command: "/usr/sbin/sendmail".into(),
+                tls: "none".into(),
             },
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
@@ -165,6 +190,8 @@ mod tests {
             body: "Test body.".into(),
             from_name: None,
             reply_to: None,
+            body_html: None,
+            cc: vec![],
             client_request_id: None,
         }
     }

@@ -16,6 +16,7 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use crate::AppState;
 
 pub mod health;
+pub mod metrics_handler;
 pub mod send;
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
         .route("/healthz", get(health::healthz))
         .route("/readyz",  get(health::readyz))
+        .route("/metrics", get(metrics_handler::metrics_handler))
         .route("/v1/send", axum::routing::post(send::send_mail))
         .layer(middleware::from_fn(request_id_layer))
         .layer(TraceLayer::new_for_http())

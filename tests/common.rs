@@ -91,6 +91,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             auth_user: None,
             auth_password: None,
             pipe_command: "/usr/sbin/sendmail".into(),
+            tls: "none".into(),
         },
         rate_limit: RateLimitConfig {
             global_per_min: 600,

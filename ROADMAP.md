@@ -31,15 +31,8 @@ Core HTTP-to-SMTP relay with security hardening.
 - Attachment support (base64-encoded, size-limited)
 - Prometheus `/metrics` endpoint
 - Workspace split (separate library and binary crates)
-## v0.4 — Planned
 
-- Prometheus `/metrics` endpoint (request count, SMTP latency histogram)
-- Cargo workspace split (library crate + binary crate)
-- HTML body support (opt-in via `Content-Type` in request)
-- Multi-part body (text/HTML alternative)
-- SMTP STARTTLS support
-
-## v0.4 — Planned
+## v0.4.0 — Shipped (2026-05-10)
 
 - Prometheus `/metrics` endpoint (request count, SMTP latency histograms)
 - Cargo workspace split (separate `http-smtp-rele-core` library crate)
@@ -47,3 +40,12 @@ Core HTTP-to-SMTP relay with security hardening.
 - Attachment support (base64-encoded, size-limited)
 - Multiple `cc` recipients (array, same validation pipeline as `to`)
 - OpenBSD: SIGHUP reload with `rpath` pledge re-application
+
+## v0.5 — Planned
+
+- Cargo workspace split (`http-smtp-rele-core` library crate + `http-smtp-rele` binary)
+- Attachment support (base64-encoded in JSON, MIME size-limited)
+- Multiple `cc` via lettre's CC header builder (already done in v0.4)
+- OpenBSD SIGHUP reload with `rpath` pledge re-application window
+- Prometheus: auth failure and rate limit counters wired to middleware layers
+- `reply_to` array support (multiple Reply-To addresses)

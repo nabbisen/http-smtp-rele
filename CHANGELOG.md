@@ -35,6 +35,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.4.0] — 2026-05-10
+
+### Added
+
+**Prometheus /metrics endpoint (RFC 401)**
+- `GET /metrics` returns Prometheus text exposition format (version 0.0.4)
+- Metrics registered per-instance in a private `prometheus::Registry` on `AppState`
+- `rele_requests_total{status}` — HTTP request count by 2xx/4xx/5xx class
+- `rele_smtp_submissions_total{result}` — SMTP submissions by ok/error
+- `rele_smtp_duration_seconds` — SMTP session duration histogram (1ms–8s buckets)
+- `rele_auth_failures_total{reason}` — auth failures by reason
+- `rele_rate_limited_total{tier}` — rate limit hits by tier (global/ip/key)
+- `rele_validation_failures_total{field}` — validation failures by field name
+- Access restriction guidance: restrict `/metrics` at the reverse proxy layer
+
+**SMTP STARTTLS and TLS (RFC 402)**
+- `[smtp].tls` field: `"none"` (default), `"starttls"` (port 587), `"tls"` (port 465)
+- lettre STARTTLS and implicit TLS builders selected at startup based on config
+- `rustls-tls` feature already present; no new dependencies required
+- Invalid `tls` value causes fail-fast startup error
+
+**HTML body — multipart/alternative (RFC 403)**
+- `body_html: Option<String>` field in `POST /v1/send` request
+- When both `body` and `body_html` are provided: `multipart/alternative` message
+- When only `body` is provided: plain `text/plain` (unchanged behaviour)
+- `body_html` subject to same `max_body_bytes` size limit as `body`
+- NUL byte rejection applied to `body_html`
+
+**cc recipients (RFC 404)**
+- `cc: Optional<string | string[]>` field in `POST /v1/send` request
+- Same `Recipients` deserializer as `to` (string or array)
+- Each cc address: RFC 5321 format validation, CR/LF rejection, domain/address policy
+- Combined `to + cc` count checked against `mail.max_recipients`
+- lettre: `.cc(mailbox)` called for each validated cc address
+
+### Changed
+
+- `config::validate_config` is now public (enables external config validation)
+- `AppState.metrics: Arc<Metrics>` added; all handler paths instrument SMTP timing
+
+---
+
 ## [0.3.0] — 2026-05-10
 
 ### Added
@@ -77,6 +119,48 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
 - `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
 - `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.4.0] — 2026-05-10
+
+### Added
+
+**Prometheus /metrics endpoint (RFC 401)**
+- `GET /metrics` returns Prometheus text exposition format (version 0.0.4)
+- Metrics registered per-instance in a private `prometheus::Registry` on `AppState`
+- `rele_requests_total{status}` — HTTP request count by 2xx/4xx/5xx class
+- `rele_smtp_submissions_total{result}` — SMTP submissions by ok/error
+- `rele_smtp_duration_seconds` — SMTP session duration histogram (1ms–8s buckets)
+- `rele_auth_failures_total{reason}` — auth failures by reason
+- `rele_rate_limited_total{tier}` — rate limit hits by tier (global/ip/key)
+- `rele_validation_failures_total{field}` — validation failures by field name
+- Access restriction guidance: restrict `/metrics` at the reverse proxy layer
+
+**SMTP STARTTLS and TLS (RFC 402)**
+- `[smtp].tls` field: `"none"` (default), `"starttls"` (port 587), `"tls"` (port 465)
+- lettre STARTTLS and implicit TLS builders selected at startup based on config
+- `rustls-tls` feature already present; no new dependencies required
+- Invalid `tls` value causes fail-fast startup error
+
+**HTML body — multipart/alternative (RFC 403)**
+- `body_html: Option<String>` field in `POST /v1/send` request
+- When both `body` and `body_html` are provided: `multipart/alternative` message
+- When only `body` is provided: plain `text/plain` (unchanged behaviour)
+- `body_html` subject to same `max_body_bytes` size limit as `body`
+- NUL byte rejection applied to `body_html`
+
+**cc recipients (RFC 404)**
+- `cc: Optional<string | string[]>` field in `POST /v1/send` request
+- Same `Recipients` deserializer as `to` (string or array)
+- Each cc address: RFC 5321 format validation, CR/LF rejection, domain/address policy
+- Combined `to + cc` count checked against `mail.max_recipients`
+- lettre: `.cc(mailbox)` called for each validated cc address
+
+### Changed
+
+- `config::validate_config` is now public (enables external config validation)
+- `AppState.metrics: Arc<Metrics>` added; all handler paths instrument SMTP timing
 
 ---
 

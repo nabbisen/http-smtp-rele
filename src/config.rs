@@ -166,6 +166,9 @@ pub struct MailConfig {
 pub struct SmtpConfig {
     #[serde(default = "default_smtp_mode")]
     pub mode: String,
+    /// TLS mode: "none" (plain TCP), "starttls" (STARTTLS), or "tls" (implicit TLS).
+    #[serde(default = "default_smtp_tls")]
+    pub tls: String,
     #[serde(default = "default_smtp_host")]
     pub host: String,
     #[serde(default = "default_smtp_port")]
@@ -266,6 +269,7 @@ fn default_per_ip_per_min() -> u32 { 20 }
 fn default_burst_size() -> u32 { 5 }
 fn default_max_recipients() -> usize { 10 }
 fn default_pipe_command() -> String { "/usr/sbin/sendmail".into() }
+fn default_smtp_tls() -> String { "none".into() }
 fn default_global_burst() -> u32 { 10 }
 fn default_per_ip_burst() -> u32 { 5 }
 fn default_per_key_burst() -> u32 { 5 }
@@ -324,11 +328,11 @@ pub enum ConfigError {
 pub fn load(path: &Path) -> Result<AppConfig, ConfigError> {
     let text = std::fs::read_to_string(path)?;
     let config: AppConfig = toml::from_str(&text)?;
-    validate(&config)?;
+    validate_config(&config)?;
     Ok(config)
 }
 
-fn validate(config: &AppConfig) -> Result<(), ConfigError> {
+pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
     // bind_address
     config
         .server
@@ -364,6 +368,14 @@ fn validate(config: &AppConfig) -> Result<(), ConfigError> {
     // SMTP port
     if config.smtp.port == 0 {
         return Err(ConfigError::InvalidSmtpPort);
+    }
+
+    // SMTP TLS mode
+    match config.smtp.tls.as_str() {
+        "none" | "starttls" | "tls" => {}
+        other => return Err(ConfigError::Validation(
+            format!("smtp.tls must be \"none\", \"starttls\", or \"tls\"; got \"{other}\"")
+        )),
     }
 
     // SMTP AUTH: both user and password must be set or both absent
@@ -436,28 +448,28 @@ default_from = "noreply@example.com"
     #[test]
     fn valid_config_parses() {
         let config: AppConfig = toml::from_str(&minimal_config_str()).unwrap();
-        assert!(validate(&config).is_ok());
+        assert!(validate_config(&config).is_ok());
     }
 
     #[test]
     fn invalid_bind_address() {
         let text = minimal_config_str().replace("127.0.0.1:8080", "notanaddress");
         let config: AppConfig = toml::from_str(&text).unwrap();
-        assert!(matches!(validate(&config), Err(ConfigError::InvalidBindAddress)));
+        assert!(matches!(validate_config(&config), Err(ConfigError::InvalidBindAddress)));
     }
 
     #[test]
     fn invalid_default_from() {
         let text = minimal_config_str().replace("noreply@example.com", "notanemail");
         let config: AppConfig = toml::from_str(&text).unwrap();
-        assert!(matches!(validate(&config), Err(ConfigError::InvalidDefaultFrom)));
+        assert!(matches!(validate_config(&config), Err(ConfigError::InvalidDefaultFrom)));
     }
 
     #[test]
     fn require_auth_no_keys() {
         let text = minimal_config_str().replace("require_auth = false", "require_auth = true");
         let config: AppConfig = toml::from_str(&text).unwrap();
-        assert!(matches!(validate(&config), Err(ConfigError::NoApiKeys)));
+        assert!(matches!(validate_config(&config), Err(ConfigError::NoApiKeys)));
     }
 
     #[test]

@@ -26,6 +26,16 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 304 | [Sendmail Pipe Mode](./done/304-sendmail-pipe-mode.md) |
 | 305 | [SIGHUP Config Reload](./done/305-sighup-reload.md) |
 
+### v0.4 Features
+
+| ID  | Title |
+|-----|-------|
+| 400 | [v0.4 Development Plan](./done/400-v04-development-plan.md) |
+| 401 | [Prometheus /metrics Endpoint](./done/401-prometheus-metrics.md) |
+| 402 | [SMTP STARTTLS and TLS](./done/402-smtp-starttls.md) |
+| 403 | [HTML Body](./done/403-html-body.md) |
+| 404 | [cc Recipients](./done/404-cc-recipients.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |

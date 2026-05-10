@@ -67,6 +67,10 @@ pub struct MailRequest {
     pub body: String,
     pub from_name: Option<String>,
     pub reply_to: Option<String>,
+    /// Optional HTML body. Combined with `body` to create multipart/alternative (RFC 403).
+    pub body_html: Option<String>,
+    /// Optional CC recipients (string or array, RFC 404).
+    pub cc: Option<Recipients>,
     /// Opaque client metadata (logged for correlation; not reflected in mail).
     pub metadata: Option<serde_json::Value>,
 }
@@ -86,6 +90,8 @@ pub struct ValidatedMailRequest {
     pub body: String,
     pub from_name: Option<String>,
     pub reply_to: Option<String>,
+    pub body_html: Option<String>,
+    pub cc: Vec<String>,
     pub client_request_id: Option<String>,
 }
 
@@ -133,11 +139,45 @@ pub fn validate_mail_request(
     }
     let to = req.to.0;
 
+    // 1b. `cc` — validate each CC recipient (RFC 404)
+    let cc: Vec<String> = if let Some(cc_recipients) = req.cc {
+        let cc_addrs = cc_recipients.0;
+        // Combined to + cc must not exceed max_recipients
+        let total = to.len() + cc_addrs.len();
+        if total > config.mail.max_recipients {
+            return Err(AppError::Validation(format!(
+                "to + cc: too many recipients (max {})",
+                config.mail.max_recipients
+            )));
+        }
+        for addr in &cc_addrs {
+            validate_email_address(addr, "cc")?;
+            sanitize::reject_header_crlf("cc", addr)?;
+            check_recipient_domain_or_address(addr, config, auth)?;
+        }
+        cc_addrs
+    } else {
+        vec![]
+    };
+
     // 2. `subject`
     let subject = validate_subject(&req.subject, mail_cfg.max_subject_chars)?;
 
     // 3. `body`
     let body = validate_body(&req.body, mail_cfg.max_body_bytes)?;
+
+    // 3b. `body_html` — size and NUL check (RFC 403)
+    if let Some(ref html) = req.body_html {
+        if html.contains('\0') {
+            return Err(AppError::Validation("body_html: contains NUL character".into()));
+        }
+        if html.len() > mail_cfg.max_body_bytes {
+            return Err(AppError::Validation(format!(
+                "body_html: exceeds maximum of {} bytes",
+                mail_cfg.max_body_bytes
+            )));
+        }
+    }
 
     // 4. `from_name` (optional)
     let from_name = req
@@ -165,8 +205,10 @@ pub fn validate_mail_request(
         to,
         subject,
         body,
+        body_html: req.body_html,
         from_name,
         reply_to,
+        cc,
         client_request_id,
     })
 }
@@ -378,6 +420,7 @@ mod tests {
                 auth_user: None,
                 auth_password: None,
                 pipe_command: "/usr/sbin/sendmail".into(),
+                tls: "none".into(),
             },
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
@@ -404,6 +447,8 @@ mod tests {
             body: "Test body".into(),
             from_name: None,
             reply_to: None,
+            body_html: None,
+            cc: None,
             metadata: None,
         }
     }

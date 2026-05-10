@@ -86,6 +86,8 @@ pub async fn send_mail(
         .unwrap_or("unknown");
 
     // Dispatch to pipe or direct SMTP based on mode (RFC 304).
+    // Time SMTP for Prometheus histogram (RFC 401).
+    let smtp_start = std::time::Instant::now();
     let smtp_result = if cfg.smtp.mode == "pipe" {
         smtp::submit_pipe(
             message,
@@ -95,8 +97,11 @@ pub async fn send_mail(
     } else {
         smtp::submit(&state.smtp, message, cfg.smtp.submission_timeout_seconds).await
     };
+    state.metrics.observe_smtp_duration(smtp_start.elapsed().as_secs_f64());
 
     smtp_result.map_err(|e| {
+            state.metrics.inc_smtp_error();
+            state.metrics.inc_request("5xx");
             tracing::error!(
                 event = "smtp_failure",
                 key_id = %auth.key_id,
@@ -107,6 +112,8 @@ pub async fn send_mail(
             e
         })?;
 
+    state.metrics.inc_smtp_ok();
+    state.metrics.inc_request("2xx");
     tracing::info!(
         event = "smtp_submitted",
         key_id = %auth.key_id,

@@ -27,6 +27,7 @@ pub mod rate_limit;
 pub mod sanitize;
 pub mod security;
 pub mod smtp;
+pub mod metrics;
 pub mod validation;
 
 #[cfg(test)]
@@ -41,6 +42,7 @@ pub struct AppState {
     config_store: arc_swap::ArcSwap<config::AppConfig>,
     pub smtp: smtp::SmtpTransport,
     pub rate_limiter: Arc<rate_limit::RateLimiter>,
+    pub metrics: Arc<metrics::Metrics>,
 }
 
 impl AppState {
@@ -49,10 +51,12 @@ impl AppState {
         let smtp = smtp::build_transport(&config.smtp)
             .expect("SMTP transport construction failed after config validation");
         let rate_limiter = Arc::new(rate_limit::RateLimiter::new(&config.rate_limit));
+        let m = Arc::new(metrics::Metrics::new());
         Arc::new(Self {
             config_store: arc_swap::ArcSwap::from_pointee(config),
             smtp,
             rate_limiter,
+            metrics: m,
         })
     }
 

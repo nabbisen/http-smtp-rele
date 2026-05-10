@@ -33,29 +33,61 @@ pub type SmtpTransport = AsyncSmtpTransport<Tokio1Executor>;
 // Initialization
 // ---------------------------------------------------------------------------
 
-/// Build the SMTP transport from config (RFC 301).
+/// Build the SMTP transport from config (RFC 301, RFC 402).
 ///
-/// Uses unencrypted ("dangerous") transport for loopback relay.
-/// When `auth_user` and `auth_password` are both set, SMTP AUTH is configured.
+/// Selects the transport based on `smtp.tls`:
+/// - `"none"`:     plain TCP (loopback relay, uses `builder_dangerous`)
+/// - `"starttls"`: STARTTLS on connect (typically port 587)
+/// - `"tls"`:      implicit TLS wrapper (typically port 465)
 ///
-/// # Errors
-///
-/// Returns `AppError::Internal` if the transport cannot be constructed.
+/// SMTP AUTH credentials are injected when both `auth_user` and `auth_password`
+/// are configured.
 pub fn build_transport(cfg: &SmtpConfig) -> Result<SmtpTransport, AppError> {
-    let mut builder = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
-        .port(cfg.port)
-        .timeout(Some(Duration::from_secs(cfg.connect_timeout_seconds)));
+    use lettre::transport::smtp::authentication::Credentials;
 
-    if let (Some(user), Some(pass)) = (&cfg.auth_user, &cfg.auth_password) {
-        use lettre::transport::smtp::authentication::Credentials;
-        builder = builder.credentials(Credentials::new(
-            user.clone(),
-            pass.expose().to_string(),
-        ));
+    let creds = if let (Some(user), Some(pass)) = (&cfg.auth_user, &cfg.auth_password) {
         tracing::debug!(smtp_user = %user, "SMTP AUTH enabled");
-    }
+        Some(Credentials::new(user.clone(), pass.expose().to_string()))
+    } else {
+        None
+    };
 
-    Ok(builder.build())
+    let timeout = Some(Duration::from_secs(cfg.connect_timeout_seconds));
+
+    let transport = match cfg.tls.as_str() {
+        "starttls" => {
+            let mut b = AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&cfg.host)
+                .map_err(|e| {
+                    tracing::error!(error = %e, "STARTTLS transport build failed");
+                    AppError::Internal
+                })?
+                .port(cfg.port)
+                .timeout(timeout);
+            if let Some(c) = creds { b = b.credentials(c); }
+            b.build()
+        }
+        "tls" => {
+            let mut b = AsyncSmtpTransport::<Tokio1Executor>::relay(&cfg.host)
+                .map_err(|e| {
+                    tracing::error!(error = %e, "TLS transport build failed");
+                    AppError::Internal
+                })?
+                .port(cfg.port)
+                .timeout(timeout);
+            if let Some(c) = creds { b = b.credentials(c); }
+            b.build()
+        }
+        _ => {
+            // "none" — plain TCP (loopback relay)
+            let mut b = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&cfg.host)
+                .port(cfg.port)
+                .timeout(timeout);
+            if let Some(c) = creds { b = b.credentials(c); }
+            b.build()
+        }
+    };
+
+    Ok(transport)
 }
 
 // ---------------------------------------------------------------------------

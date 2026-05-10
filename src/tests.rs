@@ -103,6 +103,7 @@ fn test_config() -> AppConfig {
             auth_user: None,
             auth_password: None,
             pipe_command: "/usr/sbin/sendmail".into(),
+            tls: "none".into(),
         },
         rate_limit: RateLimitConfig {
             global_per_min: 60,
