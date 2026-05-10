@@ -11,6 +11,12 @@ Run `scripts/check-rfcs.sh` to verify structural integrity.
 
 RFCs open for review. Implementation has not started.
 
+### v0.2 Planning
+
+| ID  | Title |
+|-----|-------|
+| 200 | [v0.2 Development Plan](./done/200-v02-development-plan.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
@@ -87,14 +93,46 @@ RFCs open for review. Implementation has not started.
 | 084 | [Log Format Configuration](./done/084-log-format-configuration.md) | M8 |
 | 085 | [Failure Observability](./done/085-failure-observability.md) | M8 |
 
-### T6 — Platform / Release (Testing, deferred to v0.2)
 
-| ID  | Title | Milestone |
-|-----|-------|-----------|
-| 100 | [Integration Test Harness](./proposed/100-integration-test-harness.md) | v0.2 |
-| 101 | [SMTP Stub Server](./proposed/101-smtp-stub-server.md) | v0.2 |
-| 102 | [Security Regression Test Suite](./proposed/102-security-regression-tests.md) | v0.2 |
-| 103 | [E2E Test Scenarios](./proposed/103-e2e-test-scenarios.md) | v0.2 |
+
+---
+
+## Implemented (v0.2 — in progress)
+
+### v0.2 Planning and Test Infrastructure
+
+| ID  | Title |
+|-----|-------|
+| 100 | [Integration Test Harness](./done/100-integration-test-harness.md) |
+| 101 | [SMTP Stub Server](./done/101-smtp-stub-server.md) |
+| 102 | [Security Regression Test Suite](./done/102-security-regression-tests.md) |
+| 103 | [E2E Test Scenarios](./done/103-e2e-test-scenarios.md) |
+
+### v0.2 Features
+
+| ID  | Title |
+|-----|-------|
+| 200 | [v0.2 Development Plan](./done/200-v02-development-plan.md) |
+| 201 | [Per-Tier Burst Configuration](./done/201-per-tier-burst-config.md) |
+| 202 | [Default Per-Key Rate in \[rate_limit\]](./done/202-default-per-key-rate.md) |
+| 203 | [Per-Key Burst Override](./done/203-per-key-burst-override.md) |
+| 204 | [Per-Address Recipient Allowlist](./done/204-per-address-allowlist.md) |
+| 205 | [Server Concurrency Limit](./done/205-concurrency-limit.md) |
+| 206 | [IP Bucket LRU Eviction](./done/206-ip-bucket-lru-eviction.md) |
+| 200 | [v0.2 Development Plan](./done/200-v02-development-plan.md) |
+
+---
+
+## Proposed — v0.2 Feature RFCs
+
+| ID  | Title |
+|-----|-------|
+| 201 | [Per-Tier Burst Configuration](./done/201-per-tier-burst-config.md) |
+| 202 | [Default Per-Key Rate Limit in `[rate_limit]`](./done/202-default-per-key-rate.md) |
+| 203 | [Per-Key Burst Override](./done/203-per-key-burst-override.md) |
+| 204 | [Per-Address Recipient Allowlist](./done/204-per-address-allowlist.md) |
+| 205 | [Concurrency Limit](./done/205-concurrency-limit.md) |
+| 206 | [IP Bucket LRU Eviction](./done/206-ip-bucket-lru-eviction.md) |
 
 ---
 
@@ -195,6 +233,15 @@ RFCs whose work shipped in v0.1.0. Moved from `proposed/` upon implementation.
 | 116 | [Testing Documentation](./done/116-testing-documentation.md) |
 | 117 | [Release Artifact Policy](./done/117-release-artifact-policy.md) |
 | 120 | [MVP Release Criteria](./done/120-mvp-release-criteria.md) |
+
+### T6 — Testing (v0.2)
+
+| ID  | Title |
+|-----|-------|
+| 100 | [Integration Test Harness](./done/100-integration-test-harness.md) |
+| 101 | [SMTP Stub Server](./done/101-smtp-stub-server.md) |
+| 102 | [Security Regression Test Suite](./done/102-security-regression-tests.md) |
+| 103 | [E2E Test Scenarios](./done/103-e2e-test-scenarios.md) |
 
 ---
 

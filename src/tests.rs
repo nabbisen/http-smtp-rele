@@ -25,8 +25,6 @@
 //! | SEC-016 | Send log has no body value              | structural (skip(payload) enforced) |
 //! | SEC-017 | SecretString Debug is redacted          | validation::tests + config::tests |
 
-use std::sync::Arc;
-
 use axum::{
     body::Body,
     http::{header, Request, StatusCode},
@@ -58,6 +56,7 @@ fn test_config() -> AppConfig {
             max_request_body_bytes: 256,  // intentionally small for SEC-011
             request_timeout_seconds: 5,
             shutdown_timeout_seconds: 5,
+            concurrency_limit: 0,
         },
         security: SecurityConfig {
             require_auth: true,
@@ -72,6 +71,8 @@ fn test_config() -> AppConfig {
                     description: None,
                     allowed_recipient_domains: vec!["example.com".into()],
                     rate_limit_per_min: None,
+                    allowed_recipients: vec![],
+                    burst: 0,
                 },
                 ApiKeyConfig {
                     id: "disabled-key".into(),
@@ -80,6 +81,8 @@ fn test_config() -> AppConfig {
                     description: None,
                     allowed_recipient_domains: vec![],
                     rate_limit_per_min: None,
+                    allowed_recipients: vec![],
+                    burst: 0,
                 },
             ],
         },
@@ -100,7 +103,12 @@ fn test_config() -> AppConfig {
         rate_limit: RateLimitConfig {
             global_per_min: 60,
             per_ip_per_min: 20,
-            burst_size: 5,
+            per_key_per_min: 30,
+            global_burst: 5,
+            per_ip_burst: 5,
+            per_key_burst: 5,
+            burst_size: 0,
+            ip_table_size: 100,
         },
         logging: LoggingConfig {
             format: "text".into(),

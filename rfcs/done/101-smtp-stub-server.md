@@ -1,6 +1,6 @@
 # RFC 101 — SMTP Stub Server
 
-**Status.** Proposed  
+**Status.** Implemented  
 **Tracks.** Testing  
 **Touches.** `tests/smtp_stub.rs` or test helper module
 

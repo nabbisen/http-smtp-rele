@@ -22,6 +22,7 @@ use serde::Deserialize;
 
 use crate::{
     auth::AuthContext,
+    policy,
     config::AppConfig,
     error::AppError,
     sanitize::{contains_control_chars, contains_header_injection},
@@ -91,7 +92,7 @@ pub fn validate_mail_request(
 
     // 1. `to`
     let to = validate_email_address(&req.to, "to")?;
-    check_recipient_domain(&to, config, auth)?;
+    check_recipient_domain_or_address(&to, config, auth)?;
 
     // 2. `subject`
     let subject = validate_subject(&req.subject, mail_cfg.max_subject_chars)?;
@@ -204,6 +205,24 @@ fn validate_display_name(raw: &str, field: &str) -> Result<String, AppError> {
 ///
 /// If the global `allowed_recipient_domains` list is empty, all domains are
 /// permitted at the global level (per-key policy still applies if set).
+/// Check recipient against both per-address allowlist (RFC 204) and domain allowlist.
+fn check_recipient_domain_or_address(
+    addr: &str,
+    config: &AppConfig,
+    auth: &AuthContext,
+) -> Result<(), AppError> {
+    // Per-address allowlist (key-level, RFC 204)
+    if let Some(key_cfg) = config.security.api_keys.iter().find(|k| k.id == auth.key_id) {
+        if !policy::address_permitted_for_key(key_cfg, addr) {
+            return Err(AppError::Validation(
+                "to: recipient is not permitted for this API key".into(),
+            ));
+        }
+    }
+    // Global domain policy
+    check_recipient_domain(addr, config, auth)
+}
+
 fn check_recipient_domain(
     to: &str,
     config: &AppConfig,
@@ -274,6 +293,7 @@ mod tests {
             key_id: key_id.to_string(),
             client_ip: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
             key_rate_limit_per_min: None,
+            key_burst: 0,
         }
     }
 
@@ -284,6 +304,7 @@ mod tests {
                 max_request_body_bytes: 65536,
                 request_timeout_seconds: 30,
                 shutdown_timeout_seconds: 30,
+                concurrency_limit: 0,
             },
             security: SecurityConfig {
                 require_auth: true,
@@ -296,7 +317,9 @@ mod tests {
                     enabled: true,
                     description: None,
                     allowed_recipient_domains: vec![],
+                    allowed_recipients: vec![],
                     rate_limit_per_min: None,
+                    burst: 0,
                 }],
             },
             mail: MailConfig {
@@ -316,7 +339,12 @@ mod tests {
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
                 per_ip_per_min: 20,
-                burst_size: 5,
+                per_key_per_min: 30,
+                global_burst: 5,
+                per_ip_burst: 5,
+                per_key_burst: 5,
+                burst_size: 0,
+                ip_table_size: 100,
             },
             logging: LoggingConfig {
                 format: "text".into(),

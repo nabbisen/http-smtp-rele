@@ -34,3 +34,24 @@ pub fn domain_permitted_for_key(key: &ApiKeyConfig, domain: &str) -> bool {
             .iter()
             .any(|d| d.eq_ignore_ascii_case(domain))
 }
+
+/// Return `true` if the given address is permitted for the specified API key,
+/// considering both the per-address allowlist and the per-domain allowlist.
+///
+/// Precedence (RFC 204):
+/// 1. If `allowed_recipients` is non-empty, the full address must be present
+///    (case-insensitive comparison).
+/// 2. Otherwise, fall through to `domain_permitted_for_key`.
+pub fn address_permitted_for_key(key: &ApiKeyConfig, address: &str) -> bool {
+    if !key.allowed_recipients.is_empty() {
+        return key
+            .allowed_recipients
+            .iter()
+            .any(|r| r.eq_ignore_ascii_case(address));
+    }
+    domain_permitted_for_key(key, extract_domain(address))
+}
+
+fn extract_domain(address: &str) -> &str {
+    address.rfind('@').map(|i| &address[i + 1..]).unwrap_or("")
+}

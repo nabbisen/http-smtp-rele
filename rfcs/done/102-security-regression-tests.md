@@ -1,6 +1,6 @@
 # RFC 102 — Security Regression Test Suite
 
-**Status.** Proposed  
+**Status.** Implemented  
 **Tracks.** Testing / Security  
 **Touches.** `tests/security_tests.rs`
 

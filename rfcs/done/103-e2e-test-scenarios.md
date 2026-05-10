@@ -1,6 +1,6 @@
 # RFC 103 — E2E Test Scenarios
 
-**Status.** Proposed  
+**Status.** Implemented  
 **Tracks.** Testing  
 **Touches.** `tests/e2e_tests.rs`
 

@@ -1,6 +1,6 @@
 # RFC 100 — Integration Test Harness
 
-**Status.** Proposed  
+**Status.** Implemented  
 **Tracks.** Testing  
 **Touches.** `src/tests.rs` or `tests/` directory
 

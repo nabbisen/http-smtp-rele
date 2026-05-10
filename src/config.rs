@@ -99,6 +99,9 @@ pub struct ServerConfig {
     pub request_timeout_seconds: u64,
     #[serde(default = "default_shutdown_timeout_seconds")]
     pub shutdown_timeout_seconds: u64,
+    /// Maximum concurrent in-flight requests. 0 = unlimited.
+    #[serde(default)]
+    pub concurrency_limit: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -132,7 +135,15 @@ pub struct ApiKeyConfig {
     /// Recipient domain allowlist for this key (empty = use global policy).
     #[serde(default)]
     pub allowed_recipient_domains: Vec<String>,
+    /// Exact recipient address allowlist (empty = domain-level policy only).
+    /// Takes precedence over `allowed_recipient_domains` when non-empty.
+    #[serde(default)]
+    pub allowed_recipients: Vec<String>,
+    /// Per-key sustained rate (tokens/minute). None = inherit `[rate_limit].per_key_per_min`.
     pub rate_limit_per_min: Option<u32>,
+    /// Per-key burst override. 0 = inherit `[rate_limit].per_key_burst`.
+    #[serde(default)]
+    pub burst: u32,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -164,12 +175,52 @@ pub struct SmtpConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct RateLimitConfig {
+    // Sustained rates (tokens/minute)
     #[serde(default = "default_global_per_min")]
     pub global_per_min: u32,
     #[serde(default = "default_per_ip_per_min")]
     pub per_ip_per_min: u32,
-    #[serde(default = "default_burst_size")]
+    /// Default per-key rate. Overridden by `ApiKeyConfig.rate_limit_per_min`.
+    #[serde(default = "default_per_key_per_min")]
+    pub per_key_per_min: u32,
+
+    // Burst capacities (tokens a fresh bucket starts with)
+    #[serde(default = "default_global_burst")]
+    pub global_burst: u32,
+    #[serde(default = "default_per_ip_burst")]
+    pub per_ip_burst: u32,
+    /// Default per-key burst. Overridden by `ApiKeyConfig.burst` when > 0.
+    #[serde(default = "default_per_key_burst")]
+    pub per_key_burst: u32,
+
+    /// Legacy field — sets all three burst values if the per-tier fields are absent.
+    /// Deprecated; use `global_burst`, `per_ip_burst`, `per_key_burst` instead.
+    #[serde(default)]
     pub burst_size: u32,
+
+    /// Maximum entries in the per-IP bucket map; LRU eviction above this.
+    /// 0 = unlimited (not recommended in production).
+    #[serde(default = "default_ip_table_size")]
+    pub ip_table_size: usize,
+}
+
+impl RateLimitConfig {
+    /// Effective global burst: per-tier value if set, else legacy `burst_size`, else default.
+    pub fn effective_global_burst(&self) -> u32 {
+        if self.global_burst > 0 { self.global_burst }
+        else if self.burst_size > 0 { self.burst_size }
+        else { default_global_burst() }
+    }
+    pub fn effective_per_ip_burst(&self) -> u32 {
+        if self.per_ip_burst > 0 { self.per_ip_burst }
+        else if self.burst_size > 0 { self.burst_size }
+        else { default_per_ip_burst() }
+    }
+    pub fn effective_per_key_burst(&self) -> u32 {
+        if self.per_key_burst > 0 { self.per_key_burst }
+        else if self.burst_size > 0 { self.burst_size }
+        else { default_per_key_burst() }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -201,7 +252,13 @@ fn default_connect_timeout_seconds() -> u64 { 5 }
 fn default_submission_timeout_seconds() -> u64 { 30 }
 fn default_global_per_min() -> u32 { 60 }
 fn default_per_ip_per_min() -> u32 { 20 }
+#[allow(dead_code)]
 fn default_burst_size() -> u32 { 5 }
+fn default_global_burst() -> u32 { 10 }
+fn default_per_ip_burst() -> u32 { 5 }
+fn default_per_key_burst() -> u32 { 5 }
+fn default_per_key_per_min() -> u32 { 30 }
+fn default_ip_table_size() -> usize { 10_000 }
 fn default_log_format() -> String { "text".into() }
 fn default_log_level() -> String { "info".into() }
 

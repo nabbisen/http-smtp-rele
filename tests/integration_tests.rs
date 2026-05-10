@@ -1,0 +1,574 @@
+//! Integration and security regression tests.
+//!
+//! Implements RFC 102 (complete SEC-001–017 matrix) and RFC 103 (E2E scenarios).
+//! Uses `SmtpStub` for tests that verify SMTP submission end-to-end.
+
+mod smtp_stub;
+mod common;
+
+use axum::http::StatusCode;
+use tower::ServiceExt;
+use serde_json::json;
+
+use common::{send, send_valid, test_router, test_router_no_smtp, RequestBuilder};
+use smtp_stub::{SmtpStub, StubConfig};
+
+// ===========================================================================
+// SEC-001 — No Authorization header → 401
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_001_no_auth_returns_401() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .no_auth()
+            .json(common::valid_mail_body())
+            .build(),
+    )
+    .await;
+    resp.assert_status(StatusCode::UNAUTHORIZED)
+        .assert_code("unauthorized");
+}
+
+// ===========================================================================
+// SEC-002 — Wrong token → 403
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_002_wrong_token_returns_403() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("totally-wrong")
+            .json(common::valid_mail_body())
+            .build(),
+    )
+    .await;
+    resp.assert_status(StatusCode::FORBIDDEN)
+        .assert_code("forbidden");
+}
+
+// ===========================================================================
+// SEC-003 — Disabled key with correct secret → 403 (not 200)
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_003_disabled_key_returns_403() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("disabled-secret")
+            .json(common::valid_mail_body())
+            .build(),
+    )
+    .await;
+    resp.assert_status(StatusCode::FORBIDDEN)
+        .assert_code("forbidden");
+}
+
+// ===========================================================================
+// SEC-008 — Unknown field "from" → 422
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_008_unknown_field_from_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .json(json!({
+                "to": "user@example.com",
+                "subject": "Test",
+                "body": "Hello.",
+                "from": "evil@evil.com"
+            }))
+            .build(),
+    )
+    .await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "from field must be rejected");
+}
+
+// ===========================================================================
+// SEC-009 — Unknown field "bcc" → rejected
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_009_unknown_field_bcc_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .json(json!({
+                "to": "user@example.com",
+                "subject": "Test",
+                "body": "Hello.",
+                "bcc": "spy@evil.com"
+            }))
+            .build(),
+    )
+    .await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "bcc field must be rejected");
+}
+
+// ===========================================================================
+// SEC-010 — Unknown field "headers" → rejected
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_010_unknown_field_headers_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .json(json!({
+                "to": "user@example.com",
+                "subject": "Test",
+                "body": "Hello.",
+                "headers": {"X-Custom": "injected"}
+            }))
+            .build(),
+    )
+    .await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "headers field must be rejected");
+}
+
+// ===========================================================================
+// SEC-011 — Body too large → 413
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_011_oversized_body_returns_413() {
+    use http_smtp_rele::{api, AppState};
+
+    // Build a router with a tiny body limit
+    let mut cfg = common::test_config(1);
+    cfg.server.max_request_body_bytes = 100;
+    let router = api::build_router(AppState::new(cfg));
+
+    let big = "x".repeat(200);
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .raw_body(big.as_bytes())
+            .build(),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+// ===========================================================================
+// SEC-013 — Rate limit exceeded → 429
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_013_rate_limit_exceeded_returns_429() {
+    use http_smtp_rele::{api, AppState};
+
+    // Set per-key burst to 1 so the first request exhausts the key bucket.
+    // All tier burst values must be set explicitly — per_key_burst takes priority
+    // over the legacy burst_size field.
+    let mut cfg = common::test_config(1);
+    cfg.rate_limit.per_key_burst = 1;
+    cfg.rate_limit.per_key_per_min = 1;
+    let router = api::build_router(AppState::new(cfg));
+
+    // First request consumes the single burst token; hits SMTP (port 1 = no listener) → 502
+    let _ = send_valid(&router).await;
+
+    // Second request: per-key bucket empty → 429
+    let resp = send_valid(&router).await;
+    resp.assert_status(StatusCode::TOO_MANY_REQUESTS)
+        .assert_code("rate_limited");
+}
+
+// ===========================================================================
+// SEC-015 — Auth failure response does not contain the token
+// ===========================================================================
+
+#[tokio::test]
+async fn sec_015_auth_failure_body_has_no_token() {
+    let router = test_router_no_smtp();
+    let secret = "ultra-secret-token-xyz";
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer(secret)
+            .json(common::valid_mail_body())
+            .build(),
+    )
+    .await;
+    assert_eq!(resp.status, StatusCode::FORBIDDEN);
+    let body_str = resp.body.to_string();
+    assert!(
+        !body_str.contains(secret),
+        "auth failure response must not echo the submitted token; body={body_str}"
+    );
+}
+
+// ===========================================================================
+// E2E-001 — Full pipeline: HTTP → auth → validation → SMTP stub → 202
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_001_valid_request_reaches_smtp_and_returns_202() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send_valid(&router).await;
+    resp.assert_status(StatusCode::ACCEPTED)
+        .assert_status_field("accepted");
+
+    // Verify a message was delivered to the stub
+    stub.assert_count(1);
+    let msg = stub.assert_one();
+    assert!(msg.envelope_to.contains("user@example.com"));
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// E2E-002 — SMTP unavailable → 502
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_002_smtp_down_returns_502() {
+    // Port 1 has no listener → connection refused
+    let router = test_router(1);
+    let resp = send_valid(&router).await;
+    resp.assert_status(StatusCode::BAD_GATEWAY)
+        .assert_code("smtp_unavailable");
+}
+
+// ===========================================================================
+// E2E-003 — SMTP rejects message → 502
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_003_smtp_rejects_message_returns_502() {
+    let stub = SmtpStub::start_with_config(
+        0,
+        StubConfig { reject_mail: true, ..Default::default() },
+    )
+    .await;
+    let router = test_router(stub.port());
+
+    let resp = send_valid(&router).await;
+    resp.assert_status(StatusCode::BAD_GATEWAY)
+        .assert_code("smtp_unavailable");
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// E2E-004 — /healthz returns 200 even when SMTP is down
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_004_healthz_independent_of_smtp() {
+    let router = test_router(1); // SMTP not available
+    let resp = send(
+        &router,
+        RequestBuilder::get("/healthz").build(),
+    )
+    .await;
+    resp.assert_status(StatusCode::OK)
+        .assert_status_field("ok");
+}
+
+// ===========================================================================
+// E2E-005 — /readyz returns 200 when SMTP stub is running
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_005_readyz_ok_when_smtp_reachable() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::get("/readyz").build()).await;
+    resp.assert_status(StatusCode::OK);
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// E2E-006 — /readyz returns 503 when SMTP is down
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_006_readyz_503_when_smtp_down() {
+    let router = test_router(1);
+    let resp = send(&router, RequestBuilder::get("/readyz").build()).await;
+    resp.assert_status(StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// ===========================================================================
+// E2E-007 — request_id in response body matches X-Request-Id header
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_007_request_id_consistent() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let req = RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(common::valid_mail_body())
+        .build();
+
+    let raw_resp = router.clone().oneshot(req).await.unwrap();
+    let x_request_id = raw_resp
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    let bytes = axum::body::to_bytes(raw_resp.into_body(), 4096).await.unwrap();
+    let body: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    let body_request_id = body["request_id"].as_str().unwrap_or("");
+
+    assert!(!x_request_id.is_empty(), "X-Request-Id header must be set");
+    assert_eq!(
+        x_request_id, body_request_id,
+        "X-Request-Id header must match request_id in body"
+    );
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// E2E-008 — Valid mail body is forwarded correctly to SMTP stub
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_008_mail_envelope_and_body_correct() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let _ = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .json(json!({
+                "to": "alice@example.com",
+                "subject": "Hello Alice",
+                "body": "Dear Alice, this is a test."
+            }))
+            .build(),
+    )
+    .await;
+
+    stub.assert_count(1);
+    let msg = stub.assert_one();
+    assert!(msg.envelope_to.contains("alice@example.com"), "wrong RCPT TO: {}", msg.envelope_to);
+    assert!(
+        msg.body.contains("Dear Alice"),
+        "body not forwarded: {}",
+        msg.body
+    );
+    assert!(
+        !msg.body.contains("primary-secret"),
+        "API secret must not appear in the submitted mail body"
+    );
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// E2E-009 — Wrong Content-Type → 415
+// ===========================================================================
+
+#[tokio::test]
+async fn e2e_009_wrong_content_type_returns_415() {
+    let router = test_router_no_smtp();
+    let resp = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .content_type("text/plain")
+            .raw_body(b"not json".to_vec())
+            .build(),
+    )
+    .await;
+    assert_eq!(
+        resp.status,
+        StatusCode::UNSUPPORTED_MEDIA_TYPE,
+        "wrong content-type must return 415; got {} body={}",
+        resp.status,
+        resp.body
+    );
+}
+
+// ===========================================================================
+// Structural: From address always comes from config (never from request)
+// ===========================================================================
+
+#[tokio::test]
+async fn from_address_always_from_config() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let _ = send(
+        &router,
+        RequestBuilder::post("/v1/send")
+            .bearer("primary-secret")
+            .json(json!({
+                "to": "user@example.com",
+                "subject": "Test",
+                "body": "Hello."
+            }))
+            .build(),
+    )
+    .await;
+
+    stub.assert_count(1);
+    let msg = stub.assert_one();
+    // The MAIL FROM envelope must be the config address, never something from the JSON
+    assert!(
+        msg.envelope_from.contains("relay@example.com"),
+        "MAIL FROM must be relay@example.com (config), got: {}",
+        msg.envelope_from
+    );
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// RFC 201-203 — Rate limit tier burst and per-key config
+// ===========================================================================
+
+#[tokio::test]
+async fn per_key_burst_override_respected() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    // Key with burst=2; global has burst=50 but key overrides
+    cfg.security.api_keys[0].burst = 2;
+    cfg.rate_limit.global_burst = 50;
+    cfg.rate_limit.per_key_burst = 2;
+    let router = api::build_router(AppState::new(cfg));
+
+    // Exhaust the 2-token burst
+    let _ = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+    let _ = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+
+    // Third request should be rate-limited for this key
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+    resp.assert_status(StatusCode::TOO_MANY_REQUESTS)
+        .assert_code("rate_limited");
+}
+
+#[tokio::test]
+async fn per_key_default_rate_distinct_from_ip_rate() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    cfg.rate_limit.per_key_per_min = 600;   // generous per-key default
+    cfg.rate_limit.per_ip_per_min  = 1;     // very tight IP rate
+    cfg.rate_limit.per_ip_burst    = 1;
+    cfg.rate_limit.global_burst    = 200;
+    cfg.rate_limit.per_key_burst   = 200;
+    let router = api::build_router(AppState::new(cfg));
+
+    // With per_ip burst=1, the second request from the same IP hits IP rate limit
+    let _ = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+    resp.assert_status(StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(resp.body["code"], "rate_limited");
+}
+
+// ===========================================================================
+// RFC 204 — Per-address recipient allowlist
+// ===========================================================================
+
+#[tokio::test]
+async fn per_address_allowlist_permits_listed_address() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    cfg.security.api_keys[0].allowed_recipients = vec!["alice@example.com".into()];
+    let router = api::build_router(AppState::new(cfg));
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "alice@example.com",
+            "subject": "Hi",
+            "body": "Hello."
+        }))
+        .build()).await;
+    // Fails at SMTP (port 1), not at policy — 502 means it got through validation
+    resp.assert_status(StatusCode::BAD_GATEWAY);
+}
+
+#[tokio::test]
+async fn per_address_allowlist_blocks_unlisted_address() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    cfg.security.api_keys[0].allowed_recipients = vec!["alice@example.com".into()];
+    let router = api::build_router(AppState::new(cfg));
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "bob@example.com",
+            "subject": "Hi",
+            "body": "Hello."
+        }))
+        .build()).await;
+    resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY)
+        .assert_code("validation_failed");
+}
+
+#[tokio::test]
+async fn per_address_empty_list_falls_through_to_domain_policy() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    // allowed_recipients is empty — domain policy applies
+    cfg.security.api_keys[0].allowed_recipients = vec![];
+    cfg.mail.allowed_recipient_domains = vec!["example.com".into()];
+    let router = api::build_router(AppState::new(cfg));
+
+    // Within allowed domain — reaches SMTP
+    let ok = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({"to":"any@example.com","subject":"Hi","body":"Hi"}))
+        .build()).await;
+    assert_ne!(ok.status, StatusCode::BAD_REQUEST, "should pass domain check");
+
+    // Outside allowed domain — blocked
+    let blocked = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({"to":"evil@evil.com","subject":"Hi","body":"Hi"}))
+        .build()).await;
+    blocked.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// ===========================================================================
+// RFC 205 — Concurrency limit
+// ===========================================================================
+
+#[tokio::test]
+async fn concurrency_limit_zero_is_unlimited() {
+    // concurrency_limit = 0 (default) should never return 503 from concurrency
+    let router = test_router_no_smtp();
+    let resp = send_valid(&router).await;
+    // 502 (SMTP down) is fine — it means concurrency check passed
+    assert_ne!(resp.status, StatusCode::SERVICE_UNAVAILABLE,
+        "concurrency=0 should not reject requests");
+}

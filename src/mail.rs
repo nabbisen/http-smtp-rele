@@ -107,6 +107,7 @@ mod tests {
                 max_request_body_bytes: 65536,
                 request_timeout_seconds: 30,
                 shutdown_timeout_seconds: 30,
+                concurrency_limit: 0,
             },
             security: SecurityConfig {
                 require_auth: true,
@@ -119,6 +120,8 @@ mod tests {
                     description: None,
                     allowed_recipient_domains: vec![],
                     rate_limit_per_min: None,
+                    allowed_recipients: vec![],
+                    burst: 0,
                 }],
                 allowed_source_cidrs: vec![],
             },
@@ -139,7 +142,12 @@ mod tests {
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
                 per_ip_per_min: 20,
-                burst_size: 5,
+                per_key_per_min: 30,
+                global_burst: 5,
+                per_ip_burst: 5,
+                per_key_burst: 5,
+                burst_size: 0,
+                ip_table_size: 100,
             },
             logging: LoggingConfig {
                 format: "text".into(),

@@ -3,7 +3,69 @@
 All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [Unreleased] — v0.2 (in progress)
+
+### Added
+
+**Test infrastructure (RFC 100–103)**
+- `tests/smtp_stub.rs` — in-process SMTP stub: accepts full SMTP dialog, records messages, configurable failure injection
+- `tests/common.rs` — integration test harness with `test_router()`, `RequestBuilder`, `TestResponse` helpers
+- `tests/integration_tests.rs` — 23 integration tests including 9 SEC regression tests and 9 E2E scenarios with SMTP stub
+
+**Security**
+- `X-Request-Id` response header on all responses via `request_id_layer` middleware (RFC 035)
+  - UUID generated once per request; consistent across response header and JSON body
+- Global and per-IP rate limit checks wired into send handler (RFC 072, alongside per-key check)
+
+**Rate limiting (RFC 201–203, 206)**
+- Per-tier burst configuration: `global_burst`, `per_ip_burst`, `per_key_burst` in `[rate_limit]`
+- Default per-key rate limit: `per_key_per_min` field in `[rate_limit]`
+- Per-key burst override: `ApiKeyConfig.burst` field
+- IP bucket LRU eviction: `ip_table_size` cap on the per-IP rate limit map
+- Legacy `burst_size` field retained for backward compatibility with deprecation warning
+
+**Tests added (total: 82)**
+- SEC-001–003, 008–011, 013, 015 as integration tests (previously unit-only)
+- E2E-001–009 with real SMTP stub (full HTTP → auth → validation → SMTP pipeline)
+- 4 SMTP stub self-tests
+
+### Changed
+- `api/mod.rs`: `request_id_layer` middleware added to all routes
+- `api/send.rs`: reads `request_id` from middleware header; wires global/IP rate limit checks
+
+---
+
+## [0.2.0] — 2026-05-10
+
+### Added
+
+**Test infrastructure (RFC 100–103)**
+- `tests/smtp_stub.rs` — in-process SMTP stub server; handles EHLO/MAIL FROM/RCPT TO/DATA/QUIT,
+  records messages, supports connection refusal and delivery rejection modes
+- `tests/common.rs` — integration test harness: `test_router()`, `RequestBuilder`, `TestResponse`
+- `tests/integration_tests.rs` — 29 integration tests: SEC-001–015, E2E-001–009, v0.2 feature tests
+- `X-Request-Id` response header on every response via `request_id_layer` middleware (RFC 035 complete)
+
+**Rate limit enhancements (RFC 201–203, 206)**
+- Per-tier burst settings: `[rate_limit].global_burst`, `per_ip_burst`, `per_key_burst`
+  (legacy `burst_size` still accepted with deprecation warning)
+- `[rate_limit].per_key_per_min` — default per-key rate (was incorrectly inheriting `per_ip_per_min`)
+- `ApiKeyConfig.burst` — per-key burst override (0 = inherit `per_key_burst`)
+- LRU eviction on the per-IP rate limit map (`[rate_limit].ip_table_size`, default 10 000)
+
+**Per-address recipient allowlist (RFC 204)**
+- `ApiKeyConfig.allowed_recipients: Vec<String>` — restrict a key to specific email addresses
+- Takes precedence over `allowed_recipient_domains` when non-empty
+- Case-insensitive full-address matching
+
+**Server concurrency limit (RFC 205)**
+- `server.concurrency_limit` — optional cap via `tower::limit::ConcurrencyLimitLayer`
+- 0 = unlimited (default; behaviour unchanged from v0.1)
+
+### Changed
+
+- `rate_limit.burst_size` deprecated in favour of per-tier fields (still parsed; emits warning)
+- `RateLimiter::check_key` signature extended with `burst_override: u32` parameter
 
 ---
 

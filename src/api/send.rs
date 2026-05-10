@@ -6,7 +6,7 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, Json};
+use axum::{extract::State, http::{HeaderMap, StatusCode}, Json};
 use serde_json::{json, Value};
 
 use crate::{
@@ -31,13 +31,26 @@ pub use crate::validation::MailRequest;
 /// 7. Return 202 Accepted.
 pub async fn send_mail(
     State(state): State<Arc<AppState>>,
+    req_headers: HeaderMap,
     auth: AuthContext,
     Json(payload): Json<MailRequest>,
 ) -> Result<(StatusCode, Json<Value>), AppError> {
-    // 3. Per-key rate limit (after auth so we know key_id and per-key config).
+    // 3a. Global rate limit — all requests regardless of identity (RFC 072).
+    state.rate_limiter.check_global().map_err(|e| {
+        tracing::warn!(event = "rate_limited", tier = "global", retry_after = e.retry_after_secs);
+        AppError::RateLimited { retry_after_secs: Some(e.retry_after_secs) }
+    })?;
+
+    // 3b. Per-IP rate limit (RFC 072).
+    state.rate_limiter.check_ip(auth.client_ip).map_err(|e| {
+        tracing::warn!(event = "rate_limited", tier = "ip", client_ip = %auth.client_ip, retry_after = e.retry_after_secs);
+        AppError::RateLimited { retry_after_secs: Some(e.retry_after_secs) }
+    })?;
+
+    // 3c. Per-key rate limit — after auth so we know key_id and per-key config (RFC 072).
     state
         .rate_limiter
-        .check_key(&auth.key_id, auth.key_rate_limit_per_min)
+        .check_key(&auth.key_id, auth.key_rate_limit_per_min, auth.key_burst)
         .map_err(|e| {
             tracing::warn!(
                 event = "rate_limited",
@@ -92,7 +105,14 @@ pub async fn send_mail(
     );
 
     // 7. Return 202 Accepted.
-    let request_id = uuid::Uuid::new_v4().to_string();
+    // Read the request_id set by request_id_layer middleware (RFC 035).
+    // The middleware stores it in x-internal-request-id so the response body
+    // and X-Request-Id response header carry the same value.
+    let request_id = req_headers
+        .get("x-internal-request-id")
+        .and_then(|v| v.to_str().ok())
+        .map(String::from)
+        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     Ok((
         StatusCode::ACCEPTED,
         Json(json!({

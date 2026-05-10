@@ -49,6 +49,8 @@ pub struct AuthContext {
     pub client_ip: IpAddr,
     /// Per-key rate limit override (tokens/minute). None = use global default.
     pub key_rate_limit_per_min: Option<u32>,
+    /// Per-key burst override. 0 = use global default.
+    pub key_burst: u32,
 }
 
 // ---------------------------------------------------------------------------
@@ -108,7 +110,7 @@ where
         // 4. Constant-time match against api_keys
         // ------------------------------------------------------------------
         match find_matching_key(&security.api_keys, token) {
-            MatchResult::Matched(key_id, key_rate_limit_per_min) => Ok(AuthContext { key_id, client_ip, key_rate_limit_per_min }),
+            MatchResult::Matched(key_id, key_rate_limit_per_min, key_burst) => Ok(AuthContext { key_id, client_ip, key_rate_limit_per_min, key_burst }),
             MatchResult::Disabled(key_id) => {
                 warn!(
                     client_ip = %client_ip,
@@ -158,8 +160,8 @@ fn extract_token(parts: &Parts) -> Option<&str> {
 // ---------------------------------------------------------------------------
 
 enum MatchResult {
-    /// key_id, rate_limit_per_min
-    Matched(String, Option<u32>),
+    /// key_id, rate_limit_per_min, burst
+    Matched(String, Option<u32>, u32),
     Disabled(String),
     NotFound,
 }
@@ -181,7 +183,7 @@ fn find_matching_key(keys: &[ApiKeyConfig], token: &str) -> MatchResult {
     }
 
     match matched_key {
-        Some(k) if k.enabled => MatchResult::Matched(k.id.clone(), k.rate_limit_per_min),
+        Some(k) if k.enabled => MatchResult::Matched(k.id.clone(), k.rate_limit_per_min, k.burst),
         Some(k) => MatchResult::Disabled(k.id.clone()),
         None => MatchResult::NotFound,
     }
@@ -283,6 +285,8 @@ mod tests {
             description: None,
             allowed_recipient_domains: vec![],
             rate_limit_per_min: None,
+            allowed_recipients: vec![],
+            burst: 0,
         }
     }
 
@@ -290,7 +294,7 @@ mod tests {
     fn matching_key_returns_key_id() {
         let keys = vec![make_key("svc-a", "secret-a", true)];
         match find_matching_key(&keys, "secret-a") {
-            MatchResult::Matched(id, _) => assert_eq!(id, "svc-a"),
+            MatchResult::Matched(id, _, _) => assert_eq!(id, "svc-a"),
             _ => panic!("expected Matched"),
         }
     }
@@ -320,7 +324,7 @@ mod tests {
             make_key("svc-b", "token-bbb", true),
         ];
         match find_matching_key(&keys, "token-bbb") {
-            MatchResult::Matched(id, _) => assert_eq!(id, "svc-b"),
+            MatchResult::Matched(id, _, _) => assert_eq!(id, "svc-b"),
             _ => panic!("expected Matched for svc-b"),
         }
     }
