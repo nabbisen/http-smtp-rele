@@ -35,6 +35,61 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.13.0] — 2026-05-10
+
+### Minor maintenance release
+
+No new features. All changes are structural or correctness improvements.
+
+### Rust edition
+
+- `edition = "2021"` → `"2024"` in all workspace crates
+
+### Module system (Rust 2018+ style)
+
+- `src/api/mod.rs` → `src/api.rs`; submodules remain in `src/api/`
+- `src/config.rs` + `src/config/validate.rs`: validate_config, Default impls,
+  and config tests extracted to child module. config.rs reduced 647 → 406 lines.
+
+### Dependency cleanup
+
+- `uuid = "1"` removed — unused since v0.6 ULID migration
+- `async-trait = "0.1"` removed — unnecessary with Rust 2024 + Axum 0.8
+  (async fn in trait impls is now natively supported)
+
+### Test organisation
+
+- `src/validation.rs` test module (294 lines) moved to `src/tests.rs`
+- `tests/integration_tests.rs` split (2133 → 1070 lines):
+  - `tests/status_tests.rs` — STS-* status API tests (RFC 106, 601-603) — 594 lines
+  - `tests/bulk_tests.rs` — BULK-*, RFC 711/712/721/722 tests — 504 lines
+
+### NOTICE
+
+- Year corrected to 2026
+- `uuid` removed from dependency list
+- `async-trait` removed from dependency list
+- New deps added: `arc-swap`, `async-trait` (now removed), `base64`, `chrono`,
+  `ulid`, `prometheus`, `http-body-util`, `rusqlite` (optional), `redis` (optional),
+  `axum-server` (optional)
+- Optional feature deps annotated: `rusqlite`, `redis`, `axum-server`
+
+### Documentation
+
+- `docs/src/SUMMARY.md`: Security Reference page added (14 chapters total)
+- `docs/src/operations/security.md` now correctly referenced in navigation
+
+### File size summary (src/)
+
+| File | Before | After |
+|------|--------|-------|
+| `src/config.rs` | 647 | 406 + 250 (validate.rs) |
+| `src/validation.rs` | 730 | 435 |
+| `src/api.rs` | — | 130 (was api/mod.rs) |
+| `tests/integration_tests.rs` | 2133 | 1070 |
+
+---
+
 ## [0.12.0] — 2026-05-10
 
 ### Theme: Documentation and Security Checklist
@@ -297,6 +352,61 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.13.0] — 2026-05-10
+
+### Minor maintenance release
+
+No new features. All changes are structural or correctness improvements.
+
+### Rust edition
+
+- `edition = "2021"` → `"2024"` in all workspace crates
+
+### Module system (Rust 2018+ style)
+
+- `src/api/mod.rs` → `src/api.rs`; submodules remain in `src/api/`
+- `src/config.rs` + `src/config/validate.rs`: validate_config, Default impls,
+  and config tests extracted to child module. config.rs reduced 647 → 406 lines.
+
+### Dependency cleanup
+
+- `uuid = "1"` removed — unused since v0.6 ULID migration
+- `async-trait = "0.1"` removed — unnecessary with Rust 2024 + Axum 0.8
+  (async fn in trait impls is now natively supported)
+
+### Test organisation
+
+- `src/validation.rs` test module (294 lines) moved to `src/tests.rs`
+- `tests/integration_tests.rs` split (2133 → 1070 lines):
+  - `tests/status_tests.rs` — STS-* status API tests (RFC 106, 601-603) — 594 lines
+  - `tests/bulk_tests.rs` — BULK-*, RFC 711/712/721/722 tests — 504 lines
+
+### NOTICE
+
+- Year corrected to 2026
+- `uuid` removed from dependency list
+- `async-trait` removed from dependency list
+- New deps added: `arc-swap`, `async-trait` (now removed), `base64`, `chrono`,
+  `ulid`, `prometheus`, `http-body-util`, `rusqlite` (optional), `redis` (optional),
+  `axum-server` (optional)
+- Optional feature deps annotated: `rusqlite`, `redis`, `axum-server`
+
+### Documentation
+
+- `docs/src/SUMMARY.md`: Security Reference page added (14 chapters total)
+- `docs/src/operations/security.md` now correctly referenced in navigation
+
+### File size summary (src/)
+
+| File | Before | After |
+|------|--------|-------|
+| `src/config.rs` | 647 | 406 + 250 (validate.rs) |
+| `src/validation.rs` | 730 | 435 |
+| `src/api.rs` | — | 130 (was api/mod.rs) |
+| `tests/integration_tests.rs` | 2133 | 1070 |
 
 ---
 
@@ -778,6 +888,61 @@ Restart required: `enabled`, `store`
 
 ---
 
+## [0.13.0] — 2026-05-10
+
+### Minor maintenance release
+
+No new features. All changes are structural or correctness improvements.
+
+### Rust edition
+
+- `edition = "2021"` → `"2024"` in all workspace crates
+
+### Module system (Rust 2018+ style)
+
+- `src/api/mod.rs` → `src/api.rs`; submodules remain in `src/api/`
+- `src/config.rs` + `src/config/validate.rs`: validate_config, Default impls,
+  and config tests extracted to child module. config.rs reduced 647 → 406 lines.
+
+### Dependency cleanup
+
+- `uuid = "1"` removed — unused since v0.6 ULID migration
+- `async-trait = "0.1"` removed — unnecessary with Rust 2024 + Axum 0.8
+  (async fn in trait impls is now natively supported)
+
+### Test organisation
+
+- `src/validation.rs` test module (294 lines) moved to `src/tests.rs`
+- `tests/integration_tests.rs` split (2133 → 1070 lines):
+  - `tests/status_tests.rs` — STS-* status API tests (RFC 106, 601-603) — 594 lines
+  - `tests/bulk_tests.rs` — BULK-*, RFC 711/712/721/722 tests — 504 lines
+
+### NOTICE
+
+- Year corrected to 2026
+- `uuid` removed from dependency list
+- `async-trait` removed from dependency list
+- New deps added: `arc-swap`, `async-trait` (now removed), `base64`, `chrono`,
+  `ulid`, `prometheus`, `http-body-util`, `rusqlite` (optional), `redis` (optional),
+  `axum-server` (optional)
+- Optional feature deps annotated: `rusqlite`, `redis`, `axum-server`
+
+### Documentation
+
+- `docs/src/SUMMARY.md`: Security Reference page added (14 chapters total)
+- `docs/src/operations/security.md` now correctly referenced in navigation
+
+### File size summary (src/)
+
+| File | Before | After |
+|------|--------|-------|
+| `src/config.rs` | 647 | 406 + 250 (validate.rs) |
+| `src/validation.rs` | 730 | 435 |
+| `src/api.rs` | — | 130 (was api/mod.rs) |
+| `tests/integration_tests.rs` | 2133 | 1070 |
+
+---
+
 ## [0.12.0] — 2026-05-10
 
 ### Theme: Documentation and Security Checklist
@@ -1040,6 +1205,61 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.13.0] — 2026-05-10
+
+### Minor maintenance release
+
+No new features. All changes are structural or correctness improvements.
+
+### Rust edition
+
+- `edition = "2021"` → `"2024"` in all workspace crates
+
+### Module system (Rust 2018+ style)
+
+- `src/api/mod.rs` → `src/api.rs`; submodules remain in `src/api/`
+- `src/config.rs` + `src/config/validate.rs`: validate_config, Default impls,
+  and config tests extracted to child module. config.rs reduced 647 → 406 lines.
+
+### Dependency cleanup
+
+- `uuid = "1"` removed — unused since v0.6 ULID migration
+- `async-trait = "0.1"` removed — unnecessary with Rust 2024 + Axum 0.8
+  (async fn in trait impls is now natively supported)
+
+### Test organisation
+
+- `src/validation.rs` test module (294 lines) moved to `src/tests.rs`
+- `tests/integration_tests.rs` split (2133 → 1070 lines):
+  - `tests/status_tests.rs` — STS-* status API tests (RFC 106, 601-603) — 594 lines
+  - `tests/bulk_tests.rs` — BULK-*, RFC 711/712/721/722 tests — 504 lines
+
+### NOTICE
+
+- Year corrected to 2026
+- `uuid` removed from dependency list
+- `async-trait` removed from dependency list
+- New deps added: `arc-swap`, `async-trait` (now removed), `base64`, `chrono`,
+  `ulid`, `prometheus`, `http-body-util`, `rusqlite` (optional), `redis` (optional),
+  `axum-server` (optional)
+- Optional feature deps annotated: `rusqlite`, `redis`, `axum-server`
+
+### Documentation
+
+- `docs/src/SUMMARY.md`: Security Reference page added (14 chapters total)
+- `docs/src/operations/security.md` now correctly referenced in navigation
+
+### File size summary (src/)
+
+| File | Before | After |
+|------|--------|-------|
+| `src/config.rs` | 647 | 406 + 250 (validate.rs) |
+| `src/validation.rs` | 730 | 435 |
+| `src/api.rs` | — | 130 (was api/mod.rs) |
+| `tests/integration_tests.rs` | 2133 | 1070 |
 
 ---
 

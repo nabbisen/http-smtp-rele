@@ -9,20 +9,29 @@ See the LICENSE file for the full license text.
 This software includes the following third-party components.
 Their licenses are available in the respective crate sources.
 
-axum            — MIT
-tokio           — MIT
-tower           — MIT
-tower-http      — MIT
-lettre          — MIT
-tracing         — MIT
-tracing-subscriber — MIT
-serde           — MIT / Apache-2.0
-serde_json      — MIT / Apache-2.0
-toml            — MIT / Apache-2.0
-thiserror       — MIT / Apache-2.0
-clap            — MIT / Apache-2.0
-ipnet           — MIT / Apache-2.0
-subtle          — BSD-3-Clause
-uuid            — MIT / Apache-2.0
-anyhow          — MIT / Apache-2.0
-libc            — MIT / Apache-2.0  (OpenBSD only)
+axum                — MIT
+axum-server         — MIT                   (optional: --features tls)
+tokio               — MIT
+tower               — MIT
+tower-http          — MIT
+lettre              — MIT
+tracing             — MIT
+tracing-subscriber  — MIT
+serde               — MIT / Apache-2.0
+serde_json          — MIT / Apache-2.0
+toml                — MIT / Apache-2.0
+thiserror           — MIT / Apache-2.0
+clap                — MIT / Apache-2.0
+ipnet               — MIT / Apache-2.0
+subtle              — BSD-3-Clause
+arc-swap            — MIT / Apache-2.0
+async-trait         — MIT / Apache-2.0
+anyhow              — MIT / Apache-2.0
+base64              — MIT / Apache-2.0
+chrono              — MIT / Apache-2.0
+ulid                — MIT
+prometheus          — Apache-2.0
+http-body-util      — MIT
+libc                — MIT / Apache-2.0       (OpenBSD only)
+rusqlite            — MIT                   (optional: --features sqlite; bundles libsqlite3)
+redis               — BSD-3-Clause           (optional: --features redis)

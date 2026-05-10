@@ -106,3 +106,7 @@ Core HTTP-to-SMTP relay with security hardening.
 
 - mdbook documentation structure (RFC 731)
 - Security checklist (RFC 732)
+
+## v0.13.0 — Shipped (2026-05-10)
+
+Maintenance: edition 2024, module reorganisation, dep cleanup, test splitting.

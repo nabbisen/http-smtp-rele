@@ -23,6 +23,7 @@
 # Operations
 
 - [Security Checklist](./operations/security-checklist.md)
+- [Security Reference](./operations/security.md)
 - [OpenBSD Deployment](./operations/openbsd.md)
 - [Reverse Proxy Setup](./operations/reverse-proxy.md)
 

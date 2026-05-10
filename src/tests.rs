@@ -302,3 +302,302 @@ async fn from_address_cannot_be_overridden_via_extra_field() {
         "A request with a 'from' field must never result in 202 Accepted"
     );
 }
+
+// --- Tests from src/validation.rs ---
+#[cfg(test)]
+mod validation_tests {
+    use crate::{
+        auth::AuthContext,
+        config::{
+            ApiKeyConfig, AppConfig, LoggingConfig, MailConfig, RateLimitConfig, SecretString,
+            SecurityConfig, ServerConfig, SmtpConfig,
+        },
+        error::AppError,
+        validation::{validate_mail_request, MailRequest},
+    };
+    use std::net::IpAddr;
+
+    fn make_auth(key_id: &str) -> AuthContext {
+        AuthContext {
+            key_id: key_id.to_string(),
+            client_ip: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            key_rate_limit_per_min: None,
+            key_burst: 0,
+        }
+    }
+
+    fn minimal_config() -> AppConfig {
+        AppConfig {
+            server: ServerConfig {
+                bind_address: "127.0.0.1:8080".into(),
+                max_request_body_bytes: 65536,
+                request_timeout_seconds: 30,
+                shutdown_timeout_seconds: 30,
+                concurrency_limit: 0,
+                tls_cert: None,
+                tls_key: None,
+            },
+            security: SecurityConfig {
+                require_auth: true,
+                trust_proxy_headers: false,
+                trusted_source_cidrs: vec![],
+                    allowed_source_cidrs: vec![],
+                api_keys: vec![ApiKeyConfig {
+                    id: "test-key".into(),
+                    secret: SecretString::new("tok"),
+                    enabled: true,
+                    description: None,
+                    allowed_recipient_domains: vec![],
+                    allowed_recipients: vec![],
+                    rate_limit_per_min: None,
+                    burst: 0,
+                    mask_recipient: None,
+                }],
+            },
+            mail: MailConfig {
+                default_from: "relay@example.com".into(),
+                default_from_name: None,
+                allowed_recipient_domains: vec![],
+                max_subject_chars: 200,
+                max_body_bytes: 1_000_000,
+                max_recipients: 10,
+                max_attachments: 5,
+                max_attachment_bytes: 10 * 1024 * 1024,
+            max_bulk_messages: 10,
+            },
+            smtp: SmtpConfig {
+                mode: "smtp".into(),
+                host: "127.0.0.1".into(),
+                port: 25,
+                connect_timeout_seconds: 5,
+                submission_timeout_seconds: 30,
+                auth_user: None,
+                auth_password: None,
+                pipe_command: "/usr/sbin/sendmail".into(),
+                tls: "none".into(),
+                bulk_concurrency: 5,
+            },
+            rate_limit: RateLimitConfig {
+                global_per_min: 60,
+                per_ip_per_min: 20,
+                per_key_per_min: 30,
+                global_burst: 5,
+                per_ip_burst: 5,
+                per_key_burst: 5,
+                burst_size: 0,
+                ip_table_size: 100,
+            },
+            logging: LoggingConfig {
+                format: "text".into(),
+                level: "info".into(),
+                mask_recipient: false,
+            },
+            status: Default::default(),
+        }
+    }
+
+    fn minimal_request() -> MailRequest {
+        MailRequest {
+            to: crate::validation::Recipients(vec!["user@example.com".into()]),
+            subject: "Hello".into(),
+            body: "Test body".into(),
+            from_name: None,
+            reply_to: None,
+            body_html: None,
+            cc: None,
+            attachments: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn valid_request_passes() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = minimal_request();
+        assert!(validate_mail_request(req, &cfg, &auth).is_ok());
+    }
+
+    #[test]
+    fn invalid_email_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: crate::validation::Recipients(vec!["not-an-email".into()]),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn crlf_in_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "Hello\r\nBcc: evil@x.com".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn empty_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "   ".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn oversized_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "a".repeat(201),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn nul_in_body_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            body: "Hello\0world".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn crlf_in_from_name_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            from_name: Some("Evil\r\nBcc: attacker@evil.com".into()),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn disallowed_domain_rejected() {
+        let mut cfg = minimal_config();
+        cfg.mail.allowed_recipient_domains = vec!["allowed.com".into()];
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: crate::validation::Recipients(vec!["user@other.com".into()]),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn allowed_domain_passes() {
+        let mut cfg = minimal_config();
+        cfg.mail.allowed_recipient_domains = vec!["example.com".into()];
+        let auth = make_auth("test-key");
+        let req = minimal_request(); // to = user@example.com
+        assert!(validate_mail_request(req, &cfg, &auth).is_ok());
+    }
+
+    #[test]
+    fn per_key_domain_restriction_works() {
+        let mut cfg = minimal_config();
+        cfg.security.api_keys[0].allowed_recipient_domains = vec!["allowed.com".into()];
+        let auth = make_auth("test-key");
+        let req = minimal_request(); // to = user@example.com (not allowed)
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn metadata_client_request_id_extracted() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            metadata: Some(serde_json::json!({"request_id": "client-123"})),
+            ..minimal_request()
+        };
+        let v = validate_mail_request(req, &cfg, &auth).unwrap();
+        assert_eq!(v.client_request_id.as_deref(), Some("client-123"));
+    }
+
+    /// SEC-006: CR/LF in `reply_to` is rejected before SMTP.
+    #[test]
+    fn crlf_in_reply_to_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        for bad in &[
+            "user@example.com
+Bcc: evil@evil.com",
+            "user@example.com
+X-Header: injected",
+        ] {
+            let req = MailRequest {
+                reply_to: Some(crate::validation::Recipients(vec![bad.to_string()])),
+                ..minimal_request()
+            };
+            assert!(
+                matches!(validate_mail_request(req, &cfg, &auth), Err(AppError::Validation(_))),
+                "expected Validation error for reply_to={bad:?}"
+            );
+        }
+    }
+
+    /// SEC-007: CR/LF in `to` is rejected before SMTP.
+    #[test]
+    fn crlf_in_to_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: crate::validation::Recipients(vec!["user@example.com\nBcc: attacker@evil.com".to_string()]),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    /// SEC-017 (unit): SecretString never exposes its value through Debug.
+    #[test]
+    fn secret_string_redacted_in_debug() {
+        use crate::config::SecretString;
+        let s = SecretString::new("super-secret-token-value");
+        let debug = format!("{s:?}");
+        assert!(
+            !debug.contains("super-secret-token-value"),
+            "SecretString Debug must not expose secret; got: {debug}"
+        );
+    }
+}
+
+
