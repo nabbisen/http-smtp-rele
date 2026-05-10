@@ -110,3 +110,31 @@ level = "info"
 format = "text"
 # When true, log only the recipient domain instead of the full address.
 mask_recipient = true
+
+# ---------------------------------------------------------------------------
+# Submission Status Tracking (RFC 086-088)
+# ---------------------------------------------------------------------------
+# Track per-request status metadata so clients can query what the relay
+# observed during handling and SMTP submission.
+# Status records are metadata-only: no mail body, subject, or credentials.
+
+[status]
+# Set to false to disable all status tracking. request_id is still issued.
+enabled = true
+
+# "memory": non-durable (records lost on restart) — default, no extra deps.
+# "sqlite": durable — requires binary built with --features sqlite.
+store = "memory"
+
+# Record time-to-live in seconds. SIGHUP-reloadable.
+ttl_seconds = 3600
+
+# Maximum number of live records. Oldest evicted when exceeded. SIGHUP-reloadable.
+max_records = 10000
+
+# Background cleanup interval in seconds. SIGHUP-reloadable.
+cleanup_interval_seconds = 60
+
+# Required when store = "sqlite". Parent directory must exist before startup.
+# install -d -o _http_smtp_rele -m 750 /var/db/http-smtp-rele
+# db_path = "/var/db/http-smtp-rele/status.db"

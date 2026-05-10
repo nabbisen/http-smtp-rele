@@ -35,6 +35,142 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.8.0] — 2026-05-10
+
+### Theme: SQLite Persistent Status Store
+
+**SQLite status store (RFC 088, `--features sqlite`)**
+
+Provides durable submission status records that survive application restarts.
+Memory store remains the default. SQLite is an optional Cargo feature.
+
+Status records are metadata-only in both stores: mail body, subject,
+attachments, full recipient addresses, API keys, and SMTP credentials
+are never stored.
+
+#### Build
+
+```sh
+cargo build --features sqlite
+cargo build --release --features sqlite
+```
+
+#### Configuration
+
+```toml
+[status]
+store   = "sqlite"
+db_path = "/var/db/http-smtp-rele/status.db"
+```
+
+The parent directory must exist before startup:
+```sh
+install -d -o _http_smtp_rele -m 750 /var/db/http-smtp-rele
+```
+
+#### Implementation
+
+- `src/status_sqlite.rs` — `SqliteStatusStore` implementing `StatusStore` trait
+- `migrations/001_initial.sql` — schema embedded via `include_str!`
+- Single `Mutex<Connection>` with WAL mode
+- Schema migration via `PRAGMA user_version` (version 1)
+- Breaking migration clears all records and logs a `WARN` event
+- Downgrade (newer DB than binary) → startup error
+- `max_records` enforced at `put()` and `expire_old_records()`
+- Lazy TTL expiry on `get()` + periodic background sweep
+
+#### Security / OpenBSD
+
+`store = "sqlite"` adds `rpath wpath cpath` to pledge and
+`unveil(db_path, "rwc")`.  These are applied automatically before the main
+pledge call. Use `store = "memory"` for maximum pledge hardening.
+
+#### Non-SQLite builds
+
+`store = "sqlite"` in config with a non-SQLite binary produces a clear
+startup error:
+
+```
+fatal: status.store = "sqlite" is not available in this build.
+       Rebuild with: cargo build --features sqlite
+```
+
+#### Dependency
+
+`rusqlite = { version = "0.32", features = ["bundled"], optional = true }`
+
+### Changed
+
+- `security::apply_runtime_restrictions(mode, has_sqlite: bool)` — new signature
+- `security::apply_sqlite_restrictions(db_path)` — new public function
+- `StatusConfig` gains `db_path: Option<PathBuf>`
+- `config::validate_config` checks `store`/`db_path` consistency
+
+### Docs
+
+- `docs/configuration.md` — `[status]` section with SQLite setup guide
+- `docs/openbsd.md` — SQLite pledge/unveil additions
+- `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.8.0] — 2026-05-10
+
+### Theme: SQLite Persistent Status Store
+
+Implements RFC 088 (SQLite backend) with an optional Cargo feature.
+The default build remains unchanged; SQLite is opt-in.
+
+### Added
+
+**`--features sqlite` — optional SQLite status store (RFC 088)**
+- `[status] store = "sqlite"` — persistent status records that survive restarts
+- `[status] db_path = "/var/db/http-smtp-rele/status.db"` — required with sqlite
+- `src/status_sqlite.rs`: `SqliteStatusStore` implementing `StatusStore` trait
+- `migrations/001_initial.sql`: initial schema, embedded via `include_str!`
+- WAL mode (`PRAGMA journal_mode=WAL`) for concurrent read performance
+- Schema migration via `PRAGMA user_version` (runs in a transaction)
+- Breaking schema changes clear all records and log `WARN` (data is TTL-bounded)
+- Downgrade to older binary with newer DB schema: startup error
+
+**Build commands:**
+```sh
+cargo build --release                    # default: memory store only
+cargo build --release --features sqlite  # includes SQLite backend
+```
+
+**`AppState::new_with_store`** — constructor accepting pre-built `StatusStore`
+for tests and shared-store scenarios.
+
+**`config::load_from_str`** — parse and validate config from a TOML string
+(used for feature availability checks in tests).
+
+### Changed
+
+- `security::apply_runtime_restrictions` gains `has_sqlite: bool` parameter
+- `security::apply_sqlite_restrictions(db_path)` added (OpenBSD: unveil)
+- OpenBSD pledge for SQLite build: adds `rpath wpath cpath`
+- `[status].store` now validated: must be `"memory"` or `"sqlite"`
+- `[status].db_path` validated: required when `store = "sqlite"`
+- Non-SQLite build with `store = "sqlite"` → clear startup error message
+- Dependencies: `rusqlite = "0.32"` (optional, bundled SQLite C library)
+- Dev-dependencies: `tempfile = "3"`
+
+### Docs
+
+- `docs/getting-started.md`: SQLite build instructions
+- `docs/configuration.md`: `[status]` SQLite section (already present; refined)
+- `docs/openbsd.md`: pledge surface comparison for memory vs sqlite store
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default (no sqlite) | 81 | 69 | 150 |
+| `--features sqlite` | 92 | 76 | 168 |
+
+---
+
 ## [0.7.0] — 2026-05-10
 
 ### Theme: Observability and Operations
@@ -267,6 +403,142 @@ Restart required: `enabled`, `store`
 - `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
 - `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
 - `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.8.0] — 2026-05-10
+
+### Theme: SQLite Persistent Status Store
+
+**SQLite status store (RFC 088, `--features sqlite`)**
+
+Provides durable submission status records that survive application restarts.
+Memory store remains the default. SQLite is an optional Cargo feature.
+
+Status records are metadata-only in both stores: mail body, subject,
+attachments, full recipient addresses, API keys, and SMTP credentials
+are never stored.
+
+#### Build
+
+```sh
+cargo build --features sqlite
+cargo build --release --features sqlite
+```
+
+#### Configuration
+
+```toml
+[status]
+store   = "sqlite"
+db_path = "/var/db/http-smtp-rele/status.db"
+```
+
+The parent directory must exist before startup:
+```sh
+install -d -o _http_smtp_rele -m 750 /var/db/http-smtp-rele
+```
+
+#### Implementation
+
+- `src/status_sqlite.rs` — `SqliteStatusStore` implementing `StatusStore` trait
+- `migrations/001_initial.sql` — schema embedded via `include_str!`
+- Single `Mutex<Connection>` with WAL mode
+- Schema migration via `PRAGMA user_version` (version 1)
+- Breaking migration clears all records and logs a `WARN` event
+- Downgrade (newer DB than binary) → startup error
+- `max_records` enforced at `put()` and `expire_old_records()`
+- Lazy TTL expiry on `get()` + periodic background sweep
+
+#### Security / OpenBSD
+
+`store = "sqlite"` adds `rpath wpath cpath` to pledge and
+`unveil(db_path, "rwc")`.  These are applied automatically before the main
+pledge call. Use `store = "memory"` for maximum pledge hardening.
+
+#### Non-SQLite builds
+
+`store = "sqlite"` in config with a non-SQLite binary produces a clear
+startup error:
+
+```
+fatal: status.store = "sqlite" is not available in this build.
+       Rebuild with: cargo build --features sqlite
+```
+
+#### Dependency
+
+`rusqlite = { version = "0.32", features = ["bundled"], optional = true }`
+
+### Changed
+
+- `security::apply_runtime_restrictions(mode, has_sqlite: bool)` — new signature
+- `security::apply_sqlite_restrictions(db_path)` — new public function
+- `StatusConfig` gains `db_path: Option<PathBuf>`
+- `config::validate_config` checks `store`/`db_path` consistency
+
+### Docs
+
+- `docs/configuration.md` — `[status]` section with SQLite setup guide
+- `docs/openbsd.md` — SQLite pledge/unveil additions
+- `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.8.0] — 2026-05-10
+
+### Theme: SQLite Persistent Status Store
+
+Implements RFC 088 (SQLite backend) with an optional Cargo feature.
+The default build remains unchanged; SQLite is opt-in.
+
+### Added
+
+**`--features sqlite` — optional SQLite status store (RFC 088)**
+- `[status] store = "sqlite"` — persistent status records that survive restarts
+- `[status] db_path = "/var/db/http-smtp-rele/status.db"` — required with sqlite
+- `src/status_sqlite.rs`: `SqliteStatusStore` implementing `StatusStore` trait
+- `migrations/001_initial.sql`: initial schema, embedded via `include_str!`
+- WAL mode (`PRAGMA journal_mode=WAL`) for concurrent read performance
+- Schema migration via `PRAGMA user_version` (runs in a transaction)
+- Breaking schema changes clear all records and log `WARN` (data is TTL-bounded)
+- Downgrade to older binary with newer DB schema: startup error
+
+**Build commands:**
+```sh
+cargo build --release                    # default: memory store only
+cargo build --release --features sqlite  # includes SQLite backend
+```
+
+**`AppState::new_with_store`** — constructor accepting pre-built `StatusStore`
+for tests and shared-store scenarios.
+
+**`config::load_from_str`** — parse and validate config from a TOML string
+(used for feature availability checks in tests).
+
+### Changed
+
+- `security::apply_runtime_restrictions` gains `has_sqlite: bool` parameter
+- `security::apply_sqlite_restrictions(db_path)` added (OpenBSD: unveil)
+- OpenBSD pledge for SQLite build: adds `rpath wpath cpath`
+- `[status].store` now validated: must be `"memory"` or `"sqlite"`
+- `[status].db_path` validated: required when `store = "sqlite"`
+- Non-SQLite build with `store = "sqlite"` → clear startup error message
+- Dependencies: `rusqlite = "0.32"` (optional, bundled SQLite C library)
+- Dev-dependencies: `tempfile = "3"`
+
+### Docs
+
+- `docs/getting-started.md`: SQLite build instructions
+- `docs/configuration.md`: `[status]` SQLite section (already present; refined)
+- `docs/openbsd.md`: pledge surface comparison for memory vs sqlite store
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default (no sqlite) | 81 | 69 | 150 |
+| `--features sqlite` | 92 | 76 | 168 |
 
 ---
 

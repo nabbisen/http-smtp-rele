@@ -95,3 +95,37 @@ Successful response (`202 Accepted`):
 - [API Reference](api.md) — complete endpoint documentation
 - [Security](security.md) — securing your deployment
 - [OpenBSD Deployment](openbsd.md) — production setup on OpenBSD
+
+## Building with SQLite status store
+
+The in-memory status store is included in all builds. For persistent status
+storage that survives restarts, build with the `sqlite` feature:
+
+```sh
+# Standard build (in-memory status store only)
+cargo build --release
+
+# With SQLite status store
+cargo build --release --features sqlite
+```
+
+The `sqlite` feature links the bundled SQLite C library (`libsqlite3`). No
+system SQLite installation is required. The resulting binary is larger but
+self-contained.
+
+When using the SQLite store, create the database directory before starting:
+
+```sh
+# OpenBSD / Linux — adjust owner and path as needed
+install -d -o _http_smtp_rele -m 750 /var/db/http-smtp-rele
+```
+
+Then configure `[status]` in your TOML:
+
+```toml
+[status]
+store   = "sqlite"
+db_path = "/var/db/http-smtp-rele/status.db"
+```
+
+The database file is created automatically on first run.

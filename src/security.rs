@@ -28,9 +28,20 @@ pub fn apply_initial_restrictions(config_path: &Path) -> Result<(), String> {
     platform::apply_initial_restrictions(config_path)
 }
 
+/// Apply filesystem restrictions for the SQLite status store database (RFC 088).
+///
+/// On OpenBSD: calls `unveil(db_path, "rwc")` to allow read/write access.
+/// Must be called BEFORE `apply_runtime_restrictions` (which locks unveil).
+/// On other platforms: no-op.
+pub fn apply_sqlite_restrictions(db_path: &std::path::Path) -> Result<(), String> {
+    platform::apply_sqlite_restrictions(db_path)
+}
+
 /// Apply runtime restrictions after all initialization is complete.
-pub fn apply_runtime_restrictions(mode: RuntimeMode) -> Result<(), String> {
-    platform::apply_runtime_restrictions(mode)
+///
+/// `has_sqlite` controls whether `rpath wpath cpath` are added to the pledge set.
+pub fn apply_runtime_restrictions(mode: RuntimeMode, has_sqlite: bool) -> Result<(), String> {
+    platform::apply_runtime_restrictions(mode, has_sqlite)
 }
 
 // ---------------------------------------------------------------------------
@@ -52,11 +63,11 @@ mod platform {
         Ok(())
     }
 
-    pub fn apply_runtime_restrictions(mode: RuntimeMode) -> Result<(), String> {
+    pub fn apply_runtime_restrictions(mode: RuntimeMode, has_sqlite: bool) -> Result<(), String> {
         match mode {
             RuntimeMode::SmtpRelay => {
-                // No file access needed after config load.
-                pledge::pledge("stdio inet", None)
+                let file_prom = if has_sqlite { " rpath wpath cpath" } else { "" };
+                pledge::pledge(&format!("stdio inet{file_prom}"), None)
                     .map_err(|e| format!("runtime pledge failed: {}", e))?;
             }
             RuntimeMode::SendmailPipe { ref pipe_command } => {
@@ -65,9 +76,8 @@ mod platform {
                     .map_err(|e| format!("unveil pipe command failed: {}", e))?;
                 unveil::unveil("", "")
                     .map_err(|e| format!("unveil lock failed: {}", e))?;
-                // exec proc: needed to spawn the sendmail child process.
-                // NOTE: stdio inet is NOT included — pipe mode does not open TCP connections.
-                pledge::pledge("stdio exec proc", None)
+                let file_prom = if has_sqlite { " rpath wpath cpath" } else { "" };
+                pledge::pledge(&format!("stdio exec proc{file_prom}"), None)
                     .map_err(|e| format!("runtime pledge (pipe) failed: {}", e))?;
             }
         }
@@ -88,9 +98,8 @@ mod platform {
         Ok(())
     }
 
-    pub fn apply_runtime_restrictions(_mode: RuntimeMode) -> Result<(), String> {
-        Ok(())
-    }
+    pub fn apply_sqlite_restrictions(_db_path: &std::path::Path) -> Result<(), String> { Ok(()) }
+    pub fn apply_runtime_restrictions(_mode: RuntimeMode, _has_sqlite: bool) -> Result<(), String> { Ok(()) }
 }
 
 #[cfg(test)]
@@ -105,7 +114,7 @@ mod tests {
 
     #[test]
     fn apply_runtime_restrictions_smtp_relay_succeeds_on_non_openbsd() {
-        let result = apply_runtime_restrictions(RuntimeMode::SmtpRelay);
+        let result = apply_runtime_restrictions(RuntimeMode::SmtpRelay, false);
         assert!(result.is_ok());
     }
 
@@ -113,7 +122,7 @@ mod tests {
     fn apply_runtime_restrictions_pipe_mode_succeeds_on_non_openbsd() {
         let result = apply_runtime_restrictions(RuntimeMode::SendmailPipe {
             pipe_command: "/usr/sbin/sendmail".into(),
-        });
+        }, false);
         assert!(result.is_ok());
     }
 }

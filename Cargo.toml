@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "http-smtp-rele"
-version = "0.7.0"
+version = "0.8.0"
 edition = "2021"
 authors = ["nabbisen"]
 license = "Apache-2.0"
@@ -34,6 +34,7 @@ subtle          = "2"
 uuid            = { version = "1", features = ["v4"] }
 anyhow          = "1"
 arc-swap        = "1"
+rusqlite        = { version = "0.32", features = ["bundled"], optional = true }
 async-trait     = "0.1"
 ulid            = { version = "1", features = ["serde"] }
 chrono          = { version = "0.4", features = ["serde"] }
@@ -48,9 +49,15 @@ base64 = "0.22"
 tokio           = { version = "1", features = ["full"] }
 tower           = { version = "0.5", features = ["limit"] }
 http-body-util  = "0.1"
+tempfile        = "3"
 
 [profile.release]
 opt-level     = "z"
 lto           = true
 codegen-units = 1
 panic         = "abort"
+
+
+[features]
+default = []
+sqlite  = ["dep:rusqlite"]

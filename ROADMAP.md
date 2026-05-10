@@ -66,9 +66,22 @@ Core HTTP-to-SMTP relay with security hardening.
 - Admin `GET /v1/keys` read-only key status endpoint
 - Per-key logging mask policy (`mask_recipient` override per API key)
 
-## v0.8 — Planned
+## v0.8.0 — Shipped (2026-05-10)
 
 - RFC 088 implementation: SQLite persistent status store
 - OpenBSD SIGHUP reload with `rpath` pledge re-application window
 - Bulk send endpoint (`POST /v1/send-bulk`) with parallelism cap
 - Admin endpoint for listing all keys (admin API key concept)
+
+## v0.9 — Planned
+
+- Redis/Valkey shared status store (RFC 088 design, distributed option)
+- Bulk send endpoint (`POST /v1/send-bulk`) with per-message parallelism cap
+- OpenBSD SIGHUP reload with `rpath` pledge re-application window
+- SQLite schema version 2 (if additive changes needed)
+
+## v0.9 — Planned
+
+- Redis/Valkey shared status store option
+- OpenBSD SIGHUP with `rpath` re-application window
+- Bulk send endpoint (`POST /v1/send-bulk`)

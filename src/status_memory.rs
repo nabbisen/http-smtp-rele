@@ -206,6 +206,7 @@ mod tests {
             ttl_seconds: 3600,
             max_records: 100,
             cleanup_interval_seconds: 60,
+            db_path: None,
         }
     }
 

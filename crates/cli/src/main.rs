@@ -51,7 +51,19 @@ async fn main() {
             std::process::exit(1);
         });
 
-    // 7. Apply runtime security restrictions based on smtp.mode (RFC 304)
+    // 7. Apply runtime security restrictions based on smtp.mode (RFC 304, 088)
+    //
+    // SQLite store: unveil the db file before pledge locks the filesystem.
+    let has_sqlite = config.status.store == "sqlite";
+    if has_sqlite {
+        if let Some(ref db_path) = config.status.db_path {
+            if let Err(e) = security::apply_sqlite_restrictions(db_path) {
+                tracing::error!(error = %e, "SQLite security restriction failed");
+                std::process::exit(1);
+            }
+        }
+    }
+
     let runtime_mode = if config.smtp.mode == "pipe" {
         security::RuntimeMode::SendmailPipe {
             pipe_command: config.smtp.pipe_command.clone(),
@@ -59,7 +71,7 @@ async fn main() {
     } else {
         security::RuntimeMode::SmtpRelay
     };
-    if let Err(e) = security::apply_runtime_restrictions(runtime_mode) {
+    if let Err(e) = security::apply_runtime_restrictions(runtime_mode, has_sqlite) {
         tracing::error!(error = %e, "runtime security restriction failed");
         std::process::exit(1);
     }

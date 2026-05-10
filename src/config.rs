@@ -100,6 +100,9 @@ pub struct StatusConfig {
     /// Background cleanup interval in seconds. SIGHUP-reloadable.
     #[serde(default = "default_status_cleanup_interval_seconds")]
     pub cleanup_interval_seconds: u64,
+    /// Path to the SQLite database file. Required when `store = "sqlite"`.
+    /// The parent directory must exist; the file is created on first run.
+    pub db_path: Option<std::path::PathBuf>,
 }
 
 fn default_status_enabled() -> bool { true }
@@ -128,6 +131,7 @@ impl Default for StatusConfig {
             ttl_seconds: default_status_ttl_seconds(),
             max_records: default_status_max_records(),
             cleanup_interval_seconds: default_status_cleanup_interval_seconds(),
+            db_path: None,
         }
     }
 }
@@ -378,6 +382,12 @@ pub enum ConfigError {
 // Load and validate
 // ---------------------------------------------------------------------------
 
+pub fn load_from_str(toml_str: &str) -> Result<AppConfig, ConfigError> {
+    let config: AppConfig = toml::from_str(toml_str)?;
+    validate_config(&config)?;
+    Ok(config)
+}
+
 pub fn load(path: &Path) -> Result<AppConfig, ConfigError> {
     let text = std::fs::read_to_string(path)?;
     let config: AppConfig = toml::from_str(&text)?;
@@ -439,6 +449,24 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
             ));
         }
         _ => {}
+    }
+
+    // Status store: db_path required for sqlite; feature check
+    if config.status.store == "sqlite" {
+        if config.status.db_path.is_none() {
+            return Err(ConfigError::Validation(
+                "status.db_path is required when status.store = \"sqlite\"".into()
+            ));
+        }
+        #[cfg(not(feature = "sqlite"))]
+        return Err(ConfigError::Validation(
+            "status.store = \"sqlite\" is not available in this build.              Rebuild with: cargo build --features sqlite".into()
+        ));
+    } else if !matches!(config.status.store.as_str(), "memory") {
+        return Err(ConfigError::Validation(
+            format!("status.store must be \"memory\" or \"sqlite\"; got \"{}\""
+                , config.status.store)
+        ));
     }
 
     // Pipe mode: auth credentials are not applicable

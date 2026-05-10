@@ -120,3 +120,86 @@ These settings reduce security and should be changed with care:
 
 See [examples/http-smtp-rele.toml](../examples/http-smtp-rele.toml) for a fully-annotated
 example configuration.
+
+---
+
+## `[status]` — Submission Status Tracking
+
+Controls whether `http-smtp-rele` records per-request metadata in a status store.
+This allows clients to query what the relay observed during request handling and
+SMTP submission via `GET /v1/submissions/{request_id}`.
+
+**Status records are metadata only.** Mail body, subject, attachments, full
+recipient addresses, API keys, and SMTP credentials are never stored.
+
+```toml
+[status]
+enabled                  = true    # false to disable entirely
+store                    = "memory" # or "sqlite" (requires --features sqlite)
+ttl_seconds              = 3600    # record lifetime; SIGHUP-reloadable
+max_records              = 10000   # cap on live records; SIGHUP-reloadable
+cleanup_interval_seconds = 60      # background sweep interval; SIGHUP-reloadable
+```
+
+### `store = "memory"` (default)
+
+Non-durable in-process store. All records are lost on restart. No extra
+dependencies or filesystem access. Recommended for most deployments and for
+all security-sensitive environments.
+
+### `store = "sqlite"` — persistent store
+
+Survives application restarts. Suitable for single-host deployments where
+clients frequently poll `GET /v1/submissions/{request_id}` after a restart.
+
+**Requires:** binary built with `--features sqlite`.
+
+```toml
+[status]
+store   = "sqlite"
+db_path = "/var/db/http-smtp-rele/status.db"
+```
+
+**Preconditions:**
+
+1. The **parent directory** must exist before startup; the application does not create it:
+   ```sh
+   install -d -o _http_smtp_rele -m 750 /var/db/http-smtp-rele
+   ```
+2. The SQLite **file** is created automatically on the first run.
+3. `store` and `db_path` require a restart to take effect.
+
+**Schema migration:**  
+The schema version is tracked with `PRAGMA user_version`. Migrations run
+automatically at startup and are embedded in the binary. A breaking schema
+change (rare: major structural redesign only) clears all status records and
+logs a `WARN` event — acceptable because records are TTL-bounded metadata.
+Downgrading to an older binary version with a newer database triggers a
+startup error with a clear message.
+
+**OpenBSD pledge implications:**
+
+| Store | pledge promises added |
+|-------|----------------------|
+| `memory` | *(none)* |
+| `sqlite` | `rpath wpath cpath` |
+
+SQLite mode increases the pledge surface. For maximum hardening on OpenBSD,
+use `store = "memory"` and accept non-durable status records.
+
+### `enabled = false`
+
+Disables status tracking entirely. `request_id` is still issued and appears
+in response headers and logs. `GET /v1/submissions/{request_id}` always
+returns 404.
+
+### SIGHUP-reloadable settings
+
+| Setting | Reloadable |
+|---------|-----------|
+| `ttl_seconds` | ✓ SIGHUP |
+| `max_records` | ✓ SIGHUP |
+| `cleanup_interval_seconds` | ✓ SIGHUP |
+| `enabled` | ✗ restart |
+| `store` | ✗ restart |
+| `db_path` | ✗ restart |

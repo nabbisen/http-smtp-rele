@@ -158,3 +158,35 @@ grep http_smtp_rele /var/log/daemon
 6. `rcctl check http_smtp_rele`
 
 The stop/start sequence ensures the pledge/unveil state is re-applied from the new binary.
+
+---
+
+## SQLite status store on OpenBSD
+
+The SQLite status store (`store = "sqlite"`) requires additional
+`unveil` and `pledge` permissions. This is handled automatically
+when `db_path` is set in the configuration.
+
+**Additional promises added to pledge:**
+
+```
+rpath wpath cpath
+```
+
+**Additional unveil path:**
+
+```
+unveil(db_path, "rwc")
+```
+
+The unveil is applied before the main `pledge` call, during the startup
+restrictions phase. The parent directory of `db_path` must exist at startup:
+
+```sh
+# Create the database directory owned by the service user
+install -d -o _http_smtp_rele -g _http_smtp_rele -m 750 \
+    /var/db/http-smtp-rele
+```
+
+For the strictest pledge profile, use the default `store = "memory"` and
+accept non-durable (restart-clears) status records.

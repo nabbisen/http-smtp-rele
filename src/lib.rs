@@ -33,6 +33,8 @@ pub mod metrics;
 pub mod request_id;
 pub mod status;
 pub mod status_memory;
+#[cfg(feature = "sqlite")]
+pub mod status_sqlite;
 pub mod validation;
 
 #[cfg(test)]
@@ -59,10 +61,23 @@ impl AppState {
             .expect("SMTP transport construction failed after config validation");
         let rate_limiter = Arc::new(rate_limit::RateLimiter::new(&config.rate_limit));
         let m = Arc::new(metrics::Metrics::new());
-        let status_store: Arc<dyn status::StatusStore> = if config.status.enabled {
-            status_memory::InMemoryStatusStore::new(&config.status, Arc::clone(&m))
-        } else {
+        let status_store: Arc<dyn status::StatusStore> = if !config.status.enabled {
             Arc::new(status_memory::NoopStatusStore)
+        } else {
+            match config.status.store.as_str() {
+                #[cfg(feature = "sqlite")]
+                "sqlite" => {
+                    let db_path = config.status.db_path.as_deref()
+                        .expect("db_path validated in config::validate_config");
+                    status_sqlite::SqliteStatusStore::open(db_path, &config.status, Arc::clone(&m))
+                        .unwrap_or_else(|e| {
+                            // Fatal: fail loudly if SQLite cannot open
+                            eprintln!("fatal: {e}");
+                            std::process::exit(1);
+                        })
+                }
+                _ => status_memory::InMemoryStatusStore::new(&config.status, Arc::clone(&m)),
+            }
         };
         Arc::new(Self {
             config_store: arc_swap::ArcSwap::from_pointee(config),
@@ -79,6 +94,21 @@ impl AppState {
     /// SIGHUP reload replaces the stored config.
     pub fn config(&self) -> Arc<config::AppConfig> {
         self.config_store.load_full()
+    }
+
+    /// Create an `AppState` with a pre-built status store (useful for tests and SQLite).
+    pub fn new_with_store(config: config::AppConfig, store: Arc<dyn status::StatusStore>) -> Arc<Self> {
+        let smtp = smtp::build_transport(&config.smtp)
+            .expect("build_transport failed in new_with_store");
+        let rate_limiter = Arc::new(rate_limit::RateLimiter::new(&config.rate_limit));
+        let m = Arc::new(metrics::Metrics::new());
+        Arc::new(Self {
+            config_store: arc_swap::ArcSwap::from_pointee(config),
+            smtp,
+            rate_limiter,
+            metrics: m,
+            status_store: store,
+        })
     }
 
     /// Replace the stored config atomically (called on SIGHUP, RFC 305).
