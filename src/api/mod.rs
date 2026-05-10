@@ -17,6 +17,7 @@ use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 use crate::{AppState, RequestId};
 
 pub mod health;
+pub mod keys;
 pub mod metrics_handler;
 pub mod send;
 pub mod submissions;
@@ -75,6 +76,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/readyz",  get(health::readyz))
         .route("/metrics", get(metrics_handler::metrics_handler))
         .route("/v1/submissions/{request_id}", get(submissions::get_submission_status))
+        .route("/v1/keys/self", get(keys::get_key_self))
         .route("/v1/send", axum::routing::post(send::send_mail))
         .layer(middleware::from_fn(request_id_layer))
         .layer(TraceLayer::new_for_http())

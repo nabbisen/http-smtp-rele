@@ -160,6 +160,7 @@ mod tests {
                     rate_limit_per_min: None,
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 }],
                 allowed_source_cidrs: vec![],
             },

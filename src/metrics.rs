@@ -40,6 +40,14 @@ pub struct Metrics {
 
     /// Validation failures.
     pub validation_failures_total: CounterVec,
+
+    // ── Status store metrics (RFC 089 / RFC 601) ──────────────────────────
+    /// Current number of live records in the status store (gauge).
+    pub status_records_current: prometheus::Gauge,
+    /// Cumulative status transitions by status and code.
+    pub status_transitions_total: CounterVec,
+    /// Records removed by TTL expiry (lazy + periodic combined).
+    pub status_expired_total: prometheus::Counter,
 }
 
 impl Metrics {
@@ -95,6 +103,25 @@ impl Metrics {
         )
         .expect("metric registration failed: rele_validation_failures_total");
 
+        let status_records_current = prometheus::register_gauge_with_registry!(
+            "rele_status_store_records_current",
+            "Current number of live records in the submission status store",
+            registry
+        ).expect("metric registration failed: rele_status_store_records_current");
+
+        let status_transitions_total = register_counter_vec_with_registry!(
+            "rele_status_store_transitions_total",
+            "Cumulative submission status transitions by status and code",
+            &["status", "code"],
+            registry
+        ).expect("metric registration failed: rele_status_store_transitions_total");
+
+        let status_expired_total = prometheus::register_counter_with_registry!(
+            "rele_status_store_expired_total",
+            "Records removed by TTL expiration",
+            registry
+        ).expect("metric registration failed: rele_status_store_expired_total");
+
         Self {
             registry,
             requests_total,
@@ -103,6 +130,9 @@ impl Metrics {
             auth_failures_total,
             rate_limited_total,
             validation_failures_total,
+            status_records_current,
+            status_transitions_total,
+            status_expired_total,
         }
     }
 
@@ -136,6 +166,33 @@ impl Metrics {
 
     pub fn inc_validation_failure(&self, field: &str) {
         self.validation_failures_total.with_label_values(&[field]).inc();
+    }
+
+    // ── Status store helpers (RFC 601) ────────────────────────────────────
+
+    pub fn status_record_created(&self) {
+        self.status_records_current.inc();
+        self.status_transitions_total.with_label_values(&["received", "none"]).inc();
+    }
+
+    pub fn status_transitioned(&self, status: &str, code: &str) {
+        self.status_transitions_total.with_label_values(&[status, code]).inc();
+    }
+
+    pub fn status_records_expired(&self, count: usize) {
+        if count > 0 {
+            self.status_records_current.sub(count as f64);
+            self.status_expired_total.inc_by(count as f64);
+        }
+    }
+
+    pub fn status_record_expired_one(&self) {
+        self.status_records_current.dec();
+        self.status_expired_total.inc();
+    }
+
+    pub fn status_set_current(&self, count: usize) {
+        self.status_records_current.set(count as f64);
     }
 }
 

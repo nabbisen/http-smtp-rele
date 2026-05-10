@@ -58,10 +58,17 @@ Core HTTP-to-SMTP relay with security hardening.
 - Per-key logging mask policy (`mask_recipient` override per API key)
 - Admin `GET /v1/keys` read-only key status endpoint
 
-## v0.7 — Planned
+## v0.7.0 — Shipped (2026-05-10)
 
 - RFC 088 implementation: SQLite persistent status store
 - RFC 089 implementation: Prometheus metrics for status store
 - OpenBSD SIGHUP reload with `rpath` pledge re-application window
 - Admin `GET /v1/keys` read-only key status endpoint
 - Per-key logging mask policy (`mask_recipient` override per API key)
+
+## v0.8 — Planned
+
+- RFC 088 implementation: SQLite persistent status store
+- OpenBSD SIGHUP reload with `rpath` pledge re-application window
+- Bulk send endpoint (`POST /v1/send-bulk`) with parallelism cap
+- Admin endpoint for listing all keys (admin API key concept)

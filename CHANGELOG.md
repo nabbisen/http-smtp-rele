@@ -35,6 +35,38 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.7.0] — 2026-05-10
+
+### Theme: Observability and Operations
+
+**Status store Prometheus metrics (RFC 601, implements RFC 089)**
+- `rele_status_store_records_current` (Gauge) — live record count
+- `rele_status_store_transitions_total{status, code}` (Counter) — per-transition counts
+- `rele_status_store_expired_total` (Counter) — TTL expiry events
+- `Arc<Metrics>` passed to `InMemoryStatusStore` at construction
+- Label cardinality bounded: no `request_id`, `key_id`, `client_ip`, or `recipient_domain` labels
+
+**Authenticated key info endpoint (RFC 602)**
+- `GET /v1/keys/self` — returns non-secret config of the authenticated API key
+- Fields: `id`, `enabled`, `description`, `allowed_recipient_domains`, `allowed_recipients`,
+  `rate_limit_per_min`, `burst`, `mask_recipient`, `effective_rate_limit_per_min`, `effective_burst`
+- `secret` is never returned
+- 401/403 for missing/invalid auth
+
+**Per-key `mask_recipient` override (RFC 603)**
+- `ApiKeyConfig.mask_recipient: Option<bool>` — overrides `[logging].mask_recipient`
+- `None` (default) — inherit global setting
+- `Some(true)` — always mask `recipient_domain` in logs
+- `Some(false)` — never mask, regardless of global setting
+- Effective value resolved in `send_mail` handler for the `smtp_submitted` log event
+
+### Changed
+
+- `InMemoryStatusStore::new()` now takes `Arc<Metrics>` as second argument
+- `NoopStatusStore` unchanged (no metrics to wire)
+
+---
+
 ## [0.6.0] — 2026-05-10
 
 ### Theme: Submission Status Tracking
@@ -235,6 +267,38 @@ Restart required: `enabled`, `store`
 - `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
 - `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
 - `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.7.0] — 2026-05-10
+
+### Theme: Observability and Operations
+
+**Status store Prometheus metrics (RFC 601, implements RFC 089)**
+- `rele_status_store_records_current` (Gauge) — live record count
+- `rele_status_store_transitions_total{status, code}` (Counter) — per-transition counts
+- `rele_status_store_expired_total` (Counter) — TTL expiry events
+- `Arc<Metrics>` passed to `InMemoryStatusStore` at construction
+- Label cardinality bounded: no `request_id`, `key_id`, `client_ip`, or `recipient_domain` labels
+
+**Authenticated key info endpoint (RFC 602)**
+- `GET /v1/keys/self` — returns non-secret config of the authenticated API key
+- Fields: `id`, `enabled`, `description`, `allowed_recipient_domains`, `allowed_recipients`,
+  `rate_limit_per_min`, `burst`, `mask_recipient`, `effective_rate_limit_per_min`, `effective_burst`
+- `secret` is never returned
+- 401/403 for missing/invalid auth
+
+**Per-key `mask_recipient` override (RFC 603)**
+- `ApiKeyConfig.mask_recipient: Option<bool>` — overrides `[logging].mask_recipient`
+- `None` (default) — inherit global setting
+- `Some(true)` — always mask `recipient_domain` in logs
+- `Some(false)` — never mask, regardless of global setting
+- Effective value resolved in `send_mail` handler for the `smtp_submitted` log event
+
+### Changed
+
+- `InMemoryStatusStore::new()` now takes `Arc<Metrics>` as second argument
+- `NoopStatusStore` unchanged (no metrics to wire)
 
 ---
 

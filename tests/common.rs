@@ -51,6 +51,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
                     rate_limit_per_min: None,
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 },
                 ApiKeyConfig {
                     id: "hi-rate".into(),
@@ -61,6 +62,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
                     rate_limit_per_min: Some(600),
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 },
                 ApiKeyConfig {
                     id: "disabled".into(),
@@ -71,6 +73,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
                     rate_limit_per_min: None,
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 },
             ],
         },

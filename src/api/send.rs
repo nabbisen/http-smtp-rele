@@ -85,6 +85,12 @@ pub async fn send_mail(
             + chrono::Duration::seconds(cfg.status.ttl_seconds as i64),
     });
 
+    // ── Resolve effective mask_recipient for this key (RFC 603) ──────────
+    let effective_mask = cfg.security.api_keys.iter()
+        .find(|k| k.id == auth.key_id)
+        .and_then(|k| k.mask_recipient)
+        .unwrap_or(cfg.logging.mask_recipient);
+
     // ── Build message ──────────────────────────────────────────────────────
     let message = mail::build_message(&validated, &cfg)?;
 
@@ -127,8 +133,9 @@ pub async fn send_mail(
     });
 
     state.metrics.inc_smtp_ok(); state.metrics.inc_request("2xx");
+    let logged_domain = if effective_mask { "***" } else { recipient_domain };
     tracing::info!(event="smtp_submitted", key_id=%auth.key_id,
-        recipient_domain, request_id=%request_id);
+        recipient_domain=logged_domain, request_id=%request_id);
 
     Ok((StatusCode::ACCEPTED, Json(json!({
         "request_id": request_id.to_string(),

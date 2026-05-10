@@ -18,6 +18,7 @@ use chrono::Utc;
 
 use crate::{
     config::StatusConfig,
+    metrics::Metrics,
     request_id::RequestId,
     status::{StatusStore, StatusUpdate, SubmissionStatusRecord},
 };
@@ -36,14 +37,17 @@ pub struct InMemoryStatusStore {
     config: ArcSwap<StatusConfig>,
     /// Cumulative count of TTL-expired deletions.
     expired_total: AtomicU64,
+    /// Prometheus metrics (RFC 601).
+    metrics: Arc<Metrics>,
 }
 
 impl InMemoryStatusStore {
-    pub fn new(config: &StatusConfig) -> Arc<Self> {
+    pub fn new(config: &StatusConfig, metrics: Arc<Metrics>) -> Arc<Self> {
         Arc::new(Self {
             records: RwLock::new(HashMap::new()),
             config: ArcSwap::from_pointee(config.clone()),
             expired_total: AtomicU64::new(0),
+            metrics,
         })
     }
 
@@ -71,6 +75,7 @@ impl StatusStore for InMemoryStatusStore {
         }
 
         map.insert(key, record);
+        self.metrics.status_record_created();
     }
 
     fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) {
@@ -87,6 +92,15 @@ impl StatusStore for InMemoryStatusStore {
                 record.message = update.message;
             }
             record.updated_at = now;
+            // Instrument transition (RFC 601)
+            let status_str = serde_json::to_value(&record.status)
+                .ok().and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "unknown".into());
+            let code_str = record.code.as_ref()
+                .and_then(|c| serde_json::to_value(c).ok())
+                .and_then(|v| v.as_str().map(|s| s.to_string()))
+                .unwrap_or_else(|| "none".into());
+            self.metrics.status_transitioned(&status_str, &code_str);
         }
     }
 
@@ -113,6 +127,7 @@ impl StatusStore for InMemoryStatusStore {
             if record.is_expired() {
                 map.remove(request_id.as_str());
                 self.expired_total.fetch_add(1, Ordering::Relaxed);
+                self.metrics.status_record_expired_one();
             }
         }
         None
@@ -129,6 +144,7 @@ impl StatusStore for InMemoryStatusStore {
         let removed = before - map.len();
         if removed > 0 {
             self.expired_total.fetch_add(removed as u64, Ordering::Relaxed);
+            self.metrics.status_records_expired(removed);
         }
 
         // Step 2: if still over max_records, evict oldest by created_at.
@@ -146,7 +162,9 @@ impl StatusStore for InMemoryStatusStore {
     }
 
     fn record_count(&self) -> usize {
-        self.records.read().unwrap().len()
+        let count = self.records.read().unwrap().len();
+        self.metrics.status_set_current(count);
+        count
     }
 
     fn reload_config(&self, config: &StatusConfig) {
@@ -202,7 +220,7 @@ mod tests {
 
     #[test]
     fn put_and_get_returns_record() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
         store.put(make_record(id.clone(), "key-a", 3600));
         assert!(store.get(&id, "key-a").is_some());
@@ -210,7 +228,7 @@ mod tests {
 
     #[test]
     fn get_with_wrong_key_returns_none() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
         store.put(make_record(id.clone(), "key-a", 3600));
         assert!(store.get(&id, "key-b").is_none());
@@ -218,7 +236,7 @@ mod tests {
 
     #[test]
     fn expired_record_returns_none() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
         store.put(make_record(id.clone(), "key-a", 0)); // TTL = 0
         // Immediately expired
@@ -227,7 +245,7 @@ mod tests {
 
     #[test]
     fn update_status_transitions_correctly() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
         store.put(make_record(id.clone(), "key-a", 3600));
 
@@ -243,7 +261,7 @@ mod tests {
 
     #[test]
     fn terminal_status_is_not_updated() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
         store.put(make_record(id.clone(), "key-a", 3600));
 
@@ -263,7 +281,7 @@ mod tests {
 
     #[test]
     fn expire_old_records_removes_expired() {
-        let store = InMemoryStatusStore::new(&test_cfg());
+        let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id1 = RequestId::new();
         let id2 = RequestId::new();
         store.put(make_record(id1.clone(), "key-a", 0));    // expired
@@ -279,7 +297,7 @@ mod tests {
     fn max_records_evicts_oldest() {
         let mut cfg = test_cfg();
         cfg.max_records = 2;
-        let store = InMemoryStatusStore::new(&cfg);
+        let store = InMemoryStatusStore::new(&cfg, Arc::new(Metrics::new()));
 
         let ids: Vec<RequestId> = (0..3).map(|_| RequestId::new()).collect();
         for id in &ids {

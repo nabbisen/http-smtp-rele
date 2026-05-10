@@ -60,7 +60,7 @@ impl AppState {
         let rate_limiter = Arc::new(rate_limit::RateLimiter::new(&config.rate_limit));
         let m = Arc::new(metrics::Metrics::new());
         let status_store: Arc<dyn status::StatusStore> = if config.status.enabled {
-            status_memory::InMemoryStatusStore::new(&config.status)
+            status_memory::InMemoryStatusStore::new(&config.status, Arc::clone(&m))
         } else {
             Arc::new(status_memory::NoopStatusStore)
         };

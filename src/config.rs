@@ -186,6 +186,9 @@ pub struct ApiKeyConfig {
     /// Per-key burst override. 0 = inherit `[rate_limit].per_key_burst`.
     #[serde(default)]
     pub burst: u32,
+    /// Override global `[logging].mask_recipient` for this key (RFC 603).
+    /// `None` = inherit global setting.
+    pub mask_recipient: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

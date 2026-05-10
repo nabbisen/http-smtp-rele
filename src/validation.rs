@@ -478,6 +478,7 @@ mod tests {
                     allowed_recipients: vec![],
                     rate_limit_per_min: None,
                     burst: 0,
+                    mask_recipient: None,
                 }],
             },
             mail: MailConfig {

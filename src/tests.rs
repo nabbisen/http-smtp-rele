@@ -73,6 +73,7 @@ fn test_config() -> AppConfig {
                     rate_limit_per_min: None,
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 },
                 ApiKeyConfig {
                     id: "disabled-key".into(),
@@ -83,6 +84,7 @@ fn test_config() -> AppConfig {
                     rate_limit_per_min: None,
                     allowed_recipients: vec![],
                     burst: 0,
+                    mask_recipient: None,
                 },
             ],
         },

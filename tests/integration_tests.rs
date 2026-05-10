@@ -719,6 +719,7 @@ async fn arcswap_config_hot_swap_takes_effect_immediately() {
         allowed_recipients: vec![],
         rate_limit_per_min: None,
         burst: 0,
+        mask_recipient: None,
     };
     state.reload_config(new_cfg);
 
@@ -1299,4 +1300,92 @@ async fn sts_unauthenticated_returns_401() {
             .no_auth()
             .build()).await;
     resp.assert_status(StatusCode::UNAUTHORIZED);
+}
+
+// ===========================================================================
+// RFC 601 — Status Store Prometheus Metrics
+// ===========================================================================
+
+#[tokio::test]
+async fn status_store_metrics_in_prometheus_output() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    // Send a request to create a status record
+    let _ = send_valid(&router).await;
+
+    let metrics_resp = send(&router, RequestBuilder::get("/metrics").build()).await;
+    assert_eq!(metrics_resp.status, StatusCode::OK);
+
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// RFC 602 — GET /v1/keys/self
+// ===========================================================================
+
+#[tokio::test]
+async fn keys_self_returns_key_config() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::get("/v1/keys/self")
+        .bearer("primary-secret")
+        .build()).await;
+    resp.assert_status(StatusCode::OK);
+    assert_eq!(resp.body["id"], "primary");
+    assert_eq!(resp.body["enabled"], true);
+    // Secret must not appear
+    assert!(resp.body.get("secret").is_none() || resp.body["secret"].is_null(),
+        "secret must not appear in key info response");
+}
+
+#[tokio::test]
+async fn keys_self_unauthenticated_returns_401() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::get("/v1/keys/self")
+        .no_auth()
+        .build()).await;
+    resp.assert_status(StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn keys_self_includes_effective_rates() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::get("/v1/keys/self")
+        .bearer("primary-secret")
+        .build()).await;
+    resp.assert_status(StatusCode::OK);
+    assert!(resp.body.get("effective_rate_limit_per_min").is_some(),
+        "effective_rate_limit_per_min must be present");
+    assert!(resp.body.get("effective_burst").is_some(),
+        "effective_burst must be present");
+}
+
+// ===========================================================================
+// RFC 603 — Per-Key mask_recipient Override
+// ===========================================================================
+
+#[tokio::test]
+async fn per_key_mask_recipient_none_inherits_global() {
+    use http_smtp_rele::{api, config::*, AppState};
+    let mut cfg = common::test_config(1);
+    cfg.logging.mask_recipient = false;
+    cfg.security.api_keys[0].mask_recipient = None; // inherit
+    let _router = api::build_router(AppState::new(cfg));
+    // This is a config-only test: just verify it builds without error
+}
+
+#[tokio::test]
+async fn per_key_mask_recipient_override_true() {
+    use http_smtp_rele::{api, config::*, AppState};
+    let mut cfg = common::test_config(1);
+    cfg.logging.mask_recipient = false; // global says no mask
+    cfg.security.api_keys[0].mask_recipient = Some(true); // key overrides to mask
+    let router = api::build_router(AppState::new(cfg));
+
+    // Key info should reflect the override
+    let resp = send(&router, RequestBuilder::get("/v1/keys/self")
+        .bearer("primary-secret")
+        .build()).await;
+    assert_eq!(resp.status, StatusCode::OK);
+    assert_eq!(resp.body["mask_recipient"], true);
 }

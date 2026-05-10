@@ -57,6 +57,15 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 089 | [Submission Status Store Metrics](./done/089-submission-status-metrics.md) |
 | 106 | [Submission Status API Integration Tests](./done/106-submission-status-integration-tests.md) |
 
+### v0.7 Features — Observability and Operations
+
+| ID  | Title |
+|-----|-------|
+| 600 | [v0.7 Development Plan](./done/600-v07-development-plan.md) |
+| 601 | [Status Store Prometheus Metrics](./done/601-status-store-metrics.md) |
+| 602 | [GET /v1/keys/self — Authenticated Key Info](./done/602-key-info-endpoint.md) |
+| 603 | [Per-Key mask\_recipient Override](./done/603-per-key-mask-recipient.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
