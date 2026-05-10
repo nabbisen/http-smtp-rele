@@ -110,3 +110,7 @@ Core HTTP-to-SMTP relay with security hardening.
 ## v0.13.0 — Shipped (2026-05-10)
 
 Maintenance: edition 2024, module reorganisation, dep cleanup, test splitting.
+
+## v0.14.0 — Shipped (2026-05-10)
+
+Deploy automation: OpenBSD rc.d, Linux systemd, deployment guide.

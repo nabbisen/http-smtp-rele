@@ -1,0 +1,12 @@
+# systemd-sysusers(8) configuration for http-smtp-rele.
+#
+# Creates a dedicated system user and group if DynamicUser is not used
+# (e.g. when running on older systemd versions).
+#
+# Installation:
+#   install -m 644 http-smtp-rele.sysusers \
+#       /etc/sysusers.d/http-smtp-rele.conf
+#   systemd-sysusers
+
+# Type  Name               ID   GECOS                        Home          Shell
+u       http-smtp-rele     -    "http-smtp-rele daemon"      /var/lib/http-smtp-rele  -

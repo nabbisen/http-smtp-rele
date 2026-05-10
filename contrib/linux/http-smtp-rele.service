@@ -1,0 +1,69 @@
+# http-smtp-rele.service — systemd service unit for http-smtp-rele.
+#
+# Installation:
+#   install -m 644 http-smtp-rele.service /etc/systemd/system/
+#   systemctl daemon-reload
+#   systemctl enable http-smtp-rele
+#   systemctl start  http-smtp-rele
+#
+# Config reload (SIGHUP — RFC 721):
+#   systemctl reload http-smtp-rele
+#
+# Override settings (e.g. config path):
+#   systemctl edit http-smtp-rele
+#   # then add:
+#   [Service]
+#   ExecStart=
+#   ExecStart=/usr/local/bin/http-smtp-rele --config /etc/http-smtp-rele.toml
+
+[Unit]
+Description=http-smtp-rele — HTTP-to-SMTP submission relay
+Documentation=https://github.com/nabbisen/http-smtp-rele
+After=network.target
+# If your SMTP server is managed by systemd, add it here:
+# After=network.target opensmtpd.service
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/http-smtp-rele --config /etc/http-smtp-rele.toml
+ExecReload=/bin/kill -HUP $MAINPID
+
+Restart=on-failure
+RestartSec=5s
+
+# ── Privilege dropping ────────────────────────────────────────────────────
+# DynamicUser creates an ephemeral dedicated user automatically.
+DynamicUser=yes
+StateDirectory=http-smtp-rele
+LogsDirectory=http-smtp-rele
+ConfigurationDirectory=http-smtp-rele
+
+# ── Filesystem hardening ──────────────────────────────────────────────────
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+# Allow write access to the state directory (SQLite store, pid file)
+ReadWritePaths=/var/lib/http-smtp-rele
+
+# ── Process hardening ─────────────────────────────────────────────────────
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+
+# ── Syscall filtering ─────────────────────────────────────────────────────
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# ── Network ───────────────────────────────────────────────────────────────
+# The relay requires internet for SMTP delivery; restrict if using loopback only.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

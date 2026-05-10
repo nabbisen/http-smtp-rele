@@ -1,0 +1,31 @@
+#!/bin/ksh
+#
+# rc.d(8) service script for http-smtp-rele.
+#
+# Installation:
+#   install -m 755 http_smtp_rele /etc/rc.d/http_smtp_rele
+#   rcctl enable http_smtp_rele
+#   rcctl start  http_smtp_rele
+#
+# Reload config (SIGHUP — RFC 721):
+#   rcctl reload http_smtp_rele
+#
+# Variables that may be overridden in /etc/rc.conf.local:
+#   http_smtp_rele_flags   — extra flags for the binary (default: empty)
+#   http_smtp_rele_user    — service user (default: _http_smtp_rele)
+#   http_smtp_rele_config  — config file path (default: /etc/http-smtp-rele.toml)
+
+daemon="/usr/local/bin/http-smtp-rele"
+daemon_user="${http_smtp_rele_user:-_http_smtp_rele}"
+daemon_flags="${http_smtp_rele_flags}"
+
+. /etc/rc.d/rc.subr
+
+# Config file path, passed as a flag
+_config="${http_smtp_rele_config:-/etc/http-smtp-rele.toml}"
+daemon_flags="--config ${_config} ${daemon_flags}"
+
+rc_reload=YES
+rc_bg=YES
+
+rc_cmd $1

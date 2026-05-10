@@ -1,0 +1,19 @@
+# Minimal doas.conf snippet for http-smtp-rele administration.
+#
+# Add these lines to /etc/doas.conf to allow the designated admin user
+# to manage the service and edit the config without full root access.
+#
+# Replace "youruser" with the actual administrator login.
+
+# Allow service management via rcctl
+permit nopass youruser cmd rcctl args enable  http_smtp_rele
+permit nopass youruser cmd rcctl args disable http_smtp_rele
+permit nopass youruser cmd rcctl args start   http_smtp_rele
+permit nopass youruser cmd rcctl args stop    http_smtp_rele
+permit nopass youruser cmd rcctl args restart http_smtp_rele
+permit nopass youruser cmd rcctl args reload  http_smtp_rele
+permit nopass youruser cmd rcctl args check   http_smtp_rele
+
+# Allow editing the config file (owned root:_http_smtp_rele, mode 640)
+permit nopass youruser cmd /usr/bin/vi   args /etc/http-smtp-rele.toml
+permit nopass youruser cmd /usr/bin/nano args /etc/http-smtp-rele.toml

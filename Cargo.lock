@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "http-smtp-rele"
-version = "0.13.1"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -661,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "http-smtp-rele-cli"
-version = "0.13.1"
+version = "0.14.0"
 dependencies = [
  "anyhow",
  "axum",

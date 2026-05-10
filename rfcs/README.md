@@ -105,6 +105,15 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 731 | [mdbook Documentation Structure](./done/731-mdbook-structure.md) |
 | 732 | [Security Checklist](./done/732-security-checklist.md) |
 
+### v0.14 — Deploy Automation
+
+| ID  | Title |
+|-----|-------|
+| 740 | [v0.14 Development Plan](./done/740-v014-development-plan.md) |
+| 741 | [OpenBSD rc.d Service Script](./done/741-openbsd-rcd.md) |
+| 742 | [Linux systemd Unit File](./done/742-systemd-unit.md) |
+| 743 | [Deployment Documentation](./done/743-deployment-docs.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
