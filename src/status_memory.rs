@@ -207,6 +207,7 @@ mod tests {
             max_records: 100,
             cleanup_interval_seconds: 60,
             db_path: None,
+            redis_url: None,
         }
     }
 

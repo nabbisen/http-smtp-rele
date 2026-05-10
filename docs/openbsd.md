@@ -190,3 +190,27 @@ install -d -o _http_smtp_rele -g _http_smtp_rele -m 750 \
 
 For the strictest pledge profile, use the default `store = "memory"` and
 accept non-durable (restart-clears) status records.
+
+## SIGHUP config reload
+
+`http-smtp-rele` keeps `rpath` in the runtime pledge so that the SIGHUP
+handler can re-read the configuration file. The effective read surface is
+limited by `unveil`: only the config file path is unveiled with `"r"` access.
+
+This means `rpath` does not meaningfully expand the attack surface beyond
+what was already readable. This is the standard OpenBSD pattern for daemons
+that support configuration reload.
+
+To send a SIGHUP:
+
+```sh
+kill -HUP $(cat /var/run/http-smtp-rele.pid)
+# or, if using rc.d:
+rcctl reload http_smtp_rele
+```
+
+Reloadable settings: `ttl_seconds`, `max_records`, `cleanup_interval_seconds`,
+`rate_limit.*`, `logging.*`, `mail.*` (except fields that require rebuild).
+
+Non-reloadable (require restart): `[server]`, `[smtp]`, `[status].enabled`,
+`[status].store`, `[status].db_path`, `[status].redis_url`.

@@ -4,7 +4,7 @@ resolver = "2"
 
 [package]
 name = "http-smtp-rele"
-version = "0.10.0"
+version = "0.11.0"
 edition = "2021"
 authors = ["nabbisen"]
 license = "Apache-2.0"
@@ -36,6 +36,7 @@ anyhow          = "1"
 arc-swap        = "1"
 rusqlite        = { version = "0.32", features = ["bundled"], optional = true }
 axum-server     = { version = "0.7", features = ["tls-rustls"], optional = true }
+redis           = { version = "0.25", optional = true }
 async-trait     = "0.1"
 ulid            = { version = "1", features = ["serde"] }
 chrono          = { version = "0.4", features = ["serde"] }
@@ -63,3 +64,4 @@ panic         = "abort"
 default = []
 sqlite  = ["dep:rusqlite"]
 tls     = ["dep:axum-server"]
+redis   = ["dep:redis"]

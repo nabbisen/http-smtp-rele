@@ -35,6 +35,52 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.11.0] — 2026-05-10
+
+### Theme: Hardening Correctness and Shared State
+
+### Added
+
+**OpenBSD SIGHUP `rpath` fix (RFC 721)**
+- `rpath` is now always kept in the runtime pledge
+- SIGHUP config reload works correctly on OpenBSD
+- Security rationale: `unveil` already restricts readable paths to the config
+  file only; keeping `rpath` does not expand the effective read surface
+- Pledge sets updated: `stdio inet rpath` (smtp/memory), `stdio inet rpath wpath cpath` (sqlite)
+
+**Redis/Valkey shared status store (RFC 722, `--features redis`)**
+- `[status] store = "redis"` with `redis_url = "redis://host:port/db"`
+- Multi-instance deployments share a single status view
+- Key schema: `rele:s:{request_id}` → JSON, TTL via Redis native EXPIRE
+- Degraded mode: Redis unavailability logs WARN, does not fail mail delivery
+- `max_records` not enforced (use Redis `maxmemory-policy allkeys-lru`)
+- `expire_old_records()` is a no-op (Redis handles TTL natively)
+- Status lookup during Redis outage returns 404
+- Unit tests: serialisation round-trip, key prefix format
+- Integration tests: require `REDIS_TEST_URL` env; skipped when unset
+- `redis = "0.25"` optional dependency; `[features] redis = ["dep:redis"]`
+
+### Changed
+
+- OpenBSD runtime pledge always includes `rpath` (was dropped in v0.10)
+- `[status]` config now accepts `store = "redis"` with `redis_url`
+- Store validation: `status.store` must be `memory`, `sqlite`, or `redis`
+- Status store error message updated to mention all valid store options
+
+### Docs
+
+- `docs/configuration.md`: `store = "redis"` section added
+- `docs/openbsd.md`: SIGHUP reload section added (rpath rationale)
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 89 | 170 |
+| `--features redis` | 88 | — | 88 unit |
+
+---
+
 ## [0.10.0] — 2026-05-10
 
 ### Theme: Performance and Transport Security
@@ -191,6 +237,52 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.11.0] — 2026-05-10
+
+### Theme: Hardening Correctness and Shared State
+
+### Added
+
+**OpenBSD SIGHUP `rpath` fix (RFC 721)**
+- `rpath` is now always kept in the runtime pledge
+- SIGHUP config reload works correctly on OpenBSD
+- Security rationale: `unveil` already restricts readable paths to the config
+  file only; keeping `rpath` does not expand the effective read surface
+- Pledge sets updated: `stdio inet rpath` (smtp/memory), `stdio inet rpath wpath cpath` (sqlite)
+
+**Redis/Valkey shared status store (RFC 722, `--features redis`)**
+- `[status] store = "redis"` with `redis_url = "redis://host:port/db"`
+- Multi-instance deployments share a single status view
+- Key schema: `rele:s:{request_id}` → JSON, TTL via Redis native EXPIRE
+- Degraded mode: Redis unavailability logs WARN, does not fail mail delivery
+- `max_records` not enforced (use Redis `maxmemory-policy allkeys-lru`)
+- `expire_old_records()` is a no-op (Redis handles TTL natively)
+- Status lookup during Redis outage returns 404
+- Unit tests: serialisation round-trip, key prefix format
+- Integration tests: require `REDIS_TEST_URL` env; skipped when unset
+- `redis = "0.25"` optional dependency; `[features] redis = ["dep:redis"]`
+
+### Changed
+
+- OpenBSD runtime pledge always includes `rpath` (was dropped in v0.10)
+- `[status]` config now accepts `store = "redis"` with `redis_url`
+- Store validation: `status.store` must be `memory`, `sqlite`, or `redis`
+- Status store error message updated to mention all valid store options
+
+### Docs
+
+- `docs/configuration.md`: `store = "redis"` section added
+- `docs/openbsd.md`: SIGHUP reload section added (rpath rationale)
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 89 | 170 |
+| `--features redis` | 88 | — | 88 unit |
 
 ---
 
@@ -566,6 +658,52 @@ Restart required: `enabled`, `store`
 
 ---
 
+## [0.11.0] — 2026-05-10
+
+### Theme: Hardening Correctness and Shared State
+
+### Added
+
+**OpenBSD SIGHUP `rpath` fix (RFC 721)**
+- `rpath` is now always kept in the runtime pledge
+- SIGHUP config reload works correctly on OpenBSD
+- Security rationale: `unveil` already restricts readable paths to the config
+  file only; keeping `rpath` does not expand the effective read surface
+- Pledge sets updated: `stdio inet rpath` (smtp/memory), `stdio inet rpath wpath cpath` (sqlite)
+
+**Redis/Valkey shared status store (RFC 722, `--features redis`)**
+- `[status] store = "redis"` with `redis_url = "redis://host:port/db"`
+- Multi-instance deployments share a single status view
+- Key schema: `rele:s:{request_id}` → JSON, TTL via Redis native EXPIRE
+- Degraded mode: Redis unavailability logs WARN, does not fail mail delivery
+- `max_records` not enforced (use Redis `maxmemory-policy allkeys-lru`)
+- `expire_old_records()` is a no-op (Redis handles TTL natively)
+- Status lookup during Redis outage returns 404
+- Unit tests: serialisation round-trip, key prefix format
+- Integration tests: require `REDIS_TEST_URL` env; skipped when unset
+- `redis = "0.25"` optional dependency; `[features] redis = ["dep:redis"]`
+
+### Changed
+
+- OpenBSD runtime pledge always includes `rpath` (was dropped in v0.10)
+- `[status]` config now accepts `store = "redis"` with `redis_url`
+- Store validation: `status.store` must be `memory`, `sqlite`, or `redis`
+- Status store error message updated to mention all valid store options
+
+### Docs
+
+- `docs/configuration.md`: `store = "redis"` section added
+- `docs/openbsd.md`: SIGHUP reload section added (rpath rationale)
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 89 | 170 |
+| `--features redis` | 88 | — | 88 unit |
+
+---
+
 ## [0.10.0] — 2026-05-10
 
 ### Theme: Performance and Transport Security
@@ -722,6 +860,52 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.11.0] — 2026-05-10
+
+### Theme: Hardening Correctness and Shared State
+
+### Added
+
+**OpenBSD SIGHUP `rpath` fix (RFC 721)**
+- `rpath` is now always kept in the runtime pledge
+- SIGHUP config reload works correctly on OpenBSD
+- Security rationale: `unveil` already restricts readable paths to the config
+  file only; keeping `rpath` does not expand the effective read surface
+- Pledge sets updated: `stdio inet rpath` (smtp/memory), `stdio inet rpath wpath cpath` (sqlite)
+
+**Redis/Valkey shared status store (RFC 722, `--features redis`)**
+- `[status] store = "redis"` with `redis_url = "redis://host:port/db"`
+- Multi-instance deployments share a single status view
+- Key schema: `rele:s:{request_id}` → JSON, TTL via Redis native EXPIRE
+- Degraded mode: Redis unavailability logs WARN, does not fail mail delivery
+- `max_records` not enforced (use Redis `maxmemory-policy allkeys-lru`)
+- `expire_old_records()` is a no-op (Redis handles TTL natively)
+- Status lookup during Redis outage returns 404
+- Unit tests: serialisation round-trip, key prefix format
+- Integration tests: require `REDIS_TEST_URL` env; skipped when unset
+- `redis = "0.25"` optional dependency; `[features] redis = ["dep:redis"]`
+
+### Changed
+
+- OpenBSD runtime pledge always includes `rpath` (was dropped in v0.10)
+- `[status]` config now accepts `store = "redis"` with `redis_url`
+- Store validation: `status.store` must be `memory`, `sqlite`, or `redis`
+- Status store error message updated to mention all valid store options
+
+### Docs
+
+- `docs/configuration.md`: `store = "redis"` section added
+- `docs/openbsd.md`: SIGHUP reload section added (rpath rationale)
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 89 | 170 |
+| `--features redis` | 88 | — | 88 unit |
 
 ---
 

@@ -35,6 +35,8 @@ pub mod status;
 pub mod status_memory;
 #[cfg(feature = "sqlite")]
 pub mod status_sqlite;
+#[cfg(feature = "redis")]
+pub mod status_redis;
 pub mod validation;
 
 #[cfg(test)]
@@ -71,7 +73,16 @@ impl AppState {
                         .expect("db_path validated in config::validate_config");
                     status_sqlite::SqliteStatusStore::open(db_path, &config.status, Arc::clone(&m))
                         .unwrap_or_else(|e| {
-                            // Fatal: fail loudly if SQLite cannot open
+                            eprintln!("fatal: {e}");
+                            std::process::exit(1);
+                        })
+                }
+                #[cfg(feature = "redis")]
+                "redis" => {
+                    let url = config.status.redis_url.as_deref()
+                        .expect("redis_url validated in config::validate_config");
+                    status_redis::RedisStatusStore::open(url, &config.status, Arc::clone(&m))
+                        .unwrap_or_else(|e| {
                             eprintln!("fatal: {e}");
                             std::process::exit(1);
                         })

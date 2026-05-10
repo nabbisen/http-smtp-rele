@@ -89,6 +89,14 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 711 | [Bulk SMTP Parallelism](./done/711-bulk-smtp-parallelism.md) |
 | 712 | [HTTP Server TLS (HTTPS)](./done/712-http-server-tls.md) |
 
+### v0.11 — Hardening Correctness and Shared State
+
+| ID  | Title |
+|-----|-------|
+| 720 | [v0.11 Development Plan](./done/720-v011-development-plan.md) |
+| 721 | [OpenBSD SIGHUP rpath Fix](./done/721-openbsd-sighup-rpath.md) |
+| 722 | [Redis/Valkey Shared Status Store](./done/722-redis-valkey-status-store.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |

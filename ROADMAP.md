@@ -91,3 +91,13 @@ Core HTTP-to-SMTP relay with security hardening.
 
 - Bulk SMTP parallelism (RFC 711)
 - HTTP server TLS, optional --features tls (RFC 712)
+
+## v0.11 — Planned
+
+- OpenBSD SIGHUP `rpath` fix: keep rpath in runtime pledge, tight unveil
+- Redis/Valkey shared status store (optional feature)
+
+## v0.11.0 — Shipped (2026-05-10)
+
+- OpenBSD SIGHUP rpath fix (RFC 721)
+- Redis/Valkey shared status store, optional --features redis (RFC 722)

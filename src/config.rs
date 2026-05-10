@@ -103,6 +103,9 @@ pub struct StatusConfig {
     /// Path to the SQLite database file. Required when `store = "sqlite"`.
     /// The parent directory must exist; the file is created on first run.
     pub db_path: Option<std::path::PathBuf>,
+    /// Redis/Valkey URL for the shared status store. Required when `store = "redis"`.
+    /// Example: `redis://127.0.0.1:6379/0` or `redis+unix:///var/run/redis/redis.sock`.
+    pub redis_url: Option<String>,
 }
 
 fn default_status_enabled() -> bool { true }
@@ -134,6 +137,7 @@ impl Default for StatusConfig {
             max_records: default_status_max_records(),
             cleanup_interval_seconds: default_status_cleanup_interval_seconds(),
             db_path: None,
+            redis_url: None,
         }
     }
 }
@@ -510,7 +514,7 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         (None, None) => {}
     }
 
-    // Status store: db_path required for sqlite; feature check
+    // Status store validation (RFC 087, 088, 722)
     if config.status.store == "sqlite" {
         if config.status.db_path.is_none() {
             return Err(ConfigError::Validation(
@@ -521,9 +525,19 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::Validation(
             "status.store = \"sqlite\" is not available in this build.              Rebuild with: cargo build --features sqlite".into()
         ));
+    } else if config.status.store == "redis" {
+        if config.status.redis_url.is_none() {
+            return Err(ConfigError::Validation(
+                "status.redis_url is required when status.store = \"redis\"".into()
+            ));
+        }
+        #[cfg(not(feature = "redis"))]
+        return Err(ConfigError::Validation(
+            "status.store = \"redis\" is not available in this build.              Rebuild with: cargo build --features redis".into()
+        ));
     } else if !matches!(config.status.store.as_str(), "memory") {
         return Err(ConfigError::Validation(
-            format!("status.store must be \"memory\" or \"sqlite\"; got \"{}\""
+            format!("status.store must be \"memory\", \"sqlite\", or \"redis\"; got \"{}\""
                 , config.status.store)
         ));
     }

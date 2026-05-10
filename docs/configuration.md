@@ -187,6 +187,29 @@ startup error with a clear message.
 SQLite mode increases the pledge surface. For maximum hardening on OpenBSD,
 use `store = "memory"` and accept non-durable status records.
 
+
+### `store = "redis"` — shared distributed store
+
+Enables multi-instance deployments where all instances share a single status view.
+Requires `--features redis` build.
+
+```toml
+[status]
+store     = "redis"
+redis_url = "redis://127.0.0.1:6379/0"
+# or: redis_url = "redis+unix:///var/run/redis/redis.sock?db=0"
+```
+
+**Key schema:** `rele:s:{request_id}` → JSON, TTL set via Redis `EXPIRE`.
+
+**`max_records` is not enforced.** Configure `maxmemory-policy allkeys-lru`
+in Redis/Valkey instead.
+
+**Degraded mode:** Redis unavailability logs a warning but does not fail mail
+delivery. Status lookups return 404 while Redis is unavailable.
+
+**OpenBSD:** no additional pledge promises required (Redis uses TCP, `inet` already present).
+
 ### `enabled = false`
 
 Disables status tracking entirely. `request_id` is still issued and appears

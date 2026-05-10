@@ -2020,3 +2020,114 @@ port = 25
     assert!(result.unwrap_err().to_string().contains("not available"),
         "error must mention build flag");
 }
+
+// ===========================================================================
+// RFC 721 — OpenBSD SIGHUP rpath (config validation test)
+// ===========================================================================
+
+/// RFC-721: SIGHUP reload configuration is tested at config level.
+/// The actual pledge/unveil is OpenBSD-only and not testable in CI;
+/// we verify that the config structure supports reload.
+#[test]
+fn sighup_reload_config_structure_valid() {
+    // load_from_str exercises validate_config, which is the
+    // same path used in the SIGHUP handler
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_ok(), "basic config must parse for SIGHUP reload: {:?}", result);
+}
+
+// ===========================================================================
+// RFC 722 — Redis config validation (no running Redis required)
+// ===========================================================================
+
+/// redis_url is required when store = redis.
+#[test]
+fn redis_store_without_url_rejected() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+[status]
+store = "redis"
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "redis without redis_url must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("redis_url"), "error must mention redis_url: {msg}");
+}
+
+/// Non-redis build rejects store = redis.
+#[cfg(not(feature = "redis"))]
+#[test]
+fn non_redis_build_rejects_redis_store() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+[status]
+store = "redis"
+redis_url = "redis://127.0.0.1:6379/0"
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "redis store in non-redis build must be rejected");
+    assert!(result.unwrap_err().to_string().contains("not available"));
+}
+
+/// Unknown store value is rejected.
+#[test]
+fn unknown_store_value_rejected() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+[status]
+store = "cassandra"
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "unknown store must be rejected");
+}
