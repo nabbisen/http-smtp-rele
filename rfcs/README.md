@@ -66,6 +66,21 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 602 | [GET /v1/keys/self — Authenticated Key Info](./done/602-key-info-endpoint.md) |
 | 603 | [Per-Key mask\_recipient Override](./done/603-per-key-mask-recipient.md) |
 
+### v0.8 — SQLite Persistent Status Store
+
+| ID  | Title |
+|-----|-------|
+| 088 | [Persistent Status Store Options](./done/088-persistent-status-store-options.md) |
+
+### v0.9 — Bulk Submission
+
+| ID  | Title |
+|-----|-------|
+| 700 | [v0.9 Development Plan](./done/700-v09-development-plan.md) |
+| 701 | [POST /v1/send-bulk API](./done/701-bulk-send-api.md) |
+| 702 | [Bulk Submission Rate Limiting](./done/702-bulk-send-rate-limiting.md) |
+| 703 | [Bulk Send Integration Tests](./done/703-bulk-send-tests.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |

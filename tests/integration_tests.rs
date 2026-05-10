@@ -1643,3 +1643,216 @@ db_path = "/tmp/test.db"
     let result = config::load_from_str(toml);
     assert!(result.is_err(), "sqlite store must be rejected in non-sqlite build");
 }
+
+// ===========================================================================
+// RFC 703 — Bulk Send Integration Tests
+// ===========================================================================
+
+fn bulk_body(messages: serde_json::Value) -> serde_json::Value {
+    serde_json::json!({ "messages": messages })
+}
+
+fn two_valid_messages() -> serde_json::Value {
+    serde_json::json!([
+        {"to": "alice@example.com", "subject": "Hi Alice", "body": "Hello."},
+        {"to": "bob@example.com",   "subject": "Hi Bob",   "body": "Hello."}
+    ])
+}
+
+/// BULK-001: two valid messages → 202, both accepted.
+#[tokio::test]
+async fn bulk_001_two_valid_messages_accepted() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    assert_eq!(resp.body["total"],    2);
+    assert_eq!(resp.body["accepted"], 2);
+    assert_eq!(resp.body["rejected"], 0);
+    assert_eq!(resp.body["results"].as_array().unwrap().len(), 2);
+    assert!(resp.body["bulk_request_id"].as_str().unwrap().starts_with("req_"));
+
+    stub.shutdown().await;
+}
+
+/// BULK-002: one valid + one invalid → 202, partial results.
+#[tokio::test]
+async fn bulk_002_one_valid_one_invalid_partial() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let msgs = serde_json::json!([
+        {"to": "alice@example.com",          "subject": "OK",  "body": "Hello."},
+        {"to": "evil@disallowed.invalid",    "subject": "Bad", "body": "Hello."}
+    ]);
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(msgs))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    assert_eq!(resp.body["accepted"], 1);
+    assert_eq!(resp.body["rejected"], 1);
+
+    let results = resp.body["results"].as_array().unwrap();
+    assert_eq!(results[0]["status"], "accepted");
+    assert_eq!(results[1]["status"], "rejected");
+    assert_eq!(results[1]["code"],   "validation_failed");
+
+    stub.shutdown().await;
+}
+
+/// BULK-003: empty messages array → 400.
+#[tokio::test]
+async fn bulk_003_empty_array_returns_400() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(serde_json::json!([])))
+        .build()).await;
+    resp.assert_status(StatusCode::BAD_REQUEST);
+}
+
+/// BULK-004: array exceeds max_bulk_messages → 400.
+#[tokio::test]
+async fn bulk_004_exceeds_max_messages_returns_400() {
+    use http_smtp_rele::{api, config::*, AppState};
+    let mut cfg = common::test_config(1);
+    cfg.mail.max_bulk_messages = 2;
+    let router = api::build_router(AppState::new(cfg));
+
+    let msgs: Vec<serde_json::Value> = (0..3)
+        .map(|i| serde_json::json!({"to": format!("u{}@example.com", i),
+                                     "subject": "S", "body": "B"}))
+        .collect();
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(serde_json::json!(msgs)))
+        .build()).await;
+    resp.assert_status(StatusCode::PAYLOAD_TOO_LARGE);
+}
+
+/// BULK-005: each message has a unique request_id.
+#[tokio::test]
+async fn bulk_005_each_message_has_unique_request_id() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    let results = resp.body["results"].as_array().unwrap();
+    let id0 = results[0]["request_id"].as_str().unwrap();
+    let id1 = results[1]["request_id"].as_str().unwrap();
+    assert_ne!(id0, id1, "each message must have a distinct request_id");
+    assert!(id0.starts_with("req_"));
+    assert!(id1.starts_with("req_"));
+
+    stub.shutdown().await;
+}
+
+/// BULK-006: per-message request_id queryable via GET /v1/submissions/.
+#[tokio::test]
+async fn bulk_006_per_message_status_queryable() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let bulk_resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+    bulk_resp.assert_status(StatusCode::ACCEPTED);
+
+    let results = bulk_resp.body["results"].as_array().unwrap();
+    for r in results {
+        let rid = r["request_id"].as_str().unwrap();
+        let status_resp = send(&router,
+            RequestBuilder::get(&format!("/v1/submissions/{rid}"))
+                .bearer("primary-secret")
+                .build()).await;
+        status_resp.assert_status(StatusCode::OK);
+        assert_eq!(status_resp.body["status"], "smtp_accepted");
+    }
+
+    stub.shutdown().await;
+}
+
+/// BULK-007: unauthenticated request → 401, no messages processed.
+#[tokio::test]
+async fn bulk_007_unauthenticated_returns_401() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .no_auth()
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+    resp.assert_status(StatusCode::UNAUTHORIZED);
+}
+
+/// BULK-008: response contains no mail body / full recipient addresses.
+#[tokio::test]
+async fn bulk_008_response_excludes_sensitive_data() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let msgs = serde_json::json!([{
+        "to": "alice@example.com",
+        "subject": "SecretSubject123",
+        "body": "SecretBody456"
+    }]);
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(msgs))
+        .build()).await;
+
+    let body_str = resp.body.to_string();
+    assert!(!body_str.contains("SecretSubject123"), "subject must not appear in response");
+    assert!(!body_str.contains("SecretBody456"),    "body must not appear in response");
+    assert!(!body_str.contains("primary-secret"),   "token must not appear in response");
+    assert!(!body_str.contains("alice@example.com"), "full address must not appear in response");
+
+    stub.shutdown().await;
+}
+
+/// BULK-009: bulk_request_id is present and has req_ prefix.
+#[tokio::test]
+async fn bulk_009_bulk_request_id_format() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+
+    let brid = resp.body["bulk_request_id"].as_str().unwrap_or("");
+    assert!(brid.starts_with("req_"), "bulk_request_id must start with req_: {brid}");
+
+    stub.shutdown().await;
+}
+
+/// BULK: all-SMTP-failed → 202 with all rejected.
+#[tokio::test]
+async fn bulk_all_smtp_failed_returns_202_with_rejected() {
+    let router = test_router(1); // port 1 has no listener
+
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(bulk_body(two_valid_messages()))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    assert_eq!(resp.body["accepted"], 0);
+    assert_eq!(resp.body["rejected"], 2);
+    let results = resp.body["results"].as_array().unwrap();
+    for r in results {
+        assert_eq!(r["code"], "smtp_unavailable");
+    }
+}

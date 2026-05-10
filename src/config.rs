@@ -215,6 +215,9 @@ pub struct MailConfig {
     /// Maximum decoded size per attachment in bytes (RFC 502). Default 10 MiB.
     #[serde(default = "default_max_attachment_bytes")]
     pub max_attachment_bytes: usize,
+    /// Maximum number of messages per `POST /v1/send-bulk` request (RFC 701).
+    #[serde(default = "default_max_bulk_messages")]
+    pub max_bulk_messages: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -570,3 +573,5 @@ default_from = "noreply@example.com"
         assert_eq!(config.logging.format, "text");
     }
 }
+
+fn default_max_bulk_messages() -> usize { 10 }

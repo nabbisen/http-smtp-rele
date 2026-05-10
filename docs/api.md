@@ -149,3 +149,82 @@ When the relay's logs are in JSON format, you can correlate the server-side log 
 ```sh
 grep '"request_id":"550e8400..."' /var/log/http-smtp-rele.log
 ```
+
+## POST /v1/send-bulk
+
+Submit an array of independent mail messages in one request.
+Each message is processed through the same validation and SMTP pipeline as `POST /v1/send`.
+
+**Authentication:** Required (`Authorization: Bearer <token>`)
+
+### Request body
+
+```json
+{
+  "messages": [
+    {
+      "to": "alice@example.com",
+      "subject": "Hello Alice",
+      "body": "Hello."
+    },
+    {
+      "to": ["bob@example.com", "carol@example.org"],
+      "cc": "dave@example.com",
+      "subject": "Hello team",
+      "body": "Hello.",
+      "html_body": "<p>Hello.</p>"
+    }
+  ]
+}
+```
+
+Each element in `messages` has the same schema as `POST /v1/send`.
+Maximum array length is controlled by `[mail].max_bulk_messages` (default: 10).
+
+### Response — 202 Accepted
+
+Returned when auth passes and the payload structure is valid.
+Per-message outcomes are in `results`; partial success is normal.
+
+```json
+{
+  "bulk_request_id": "req_01HX...",
+  "total":    2,
+  "accepted": 1,
+  "rejected": 1,
+  "results": [
+    {
+      "index":      0,
+      "request_id": "req_01HX...",
+      "status":     "accepted"
+    },
+    {
+      "index":      1,
+      "request_id": "req_01HX...",
+      "status":     "rejected",
+      "code":       "validation_failed",
+      "message":    "Recipient domain not allowed."
+    }
+  ]
+}
+```
+
+The `bulk_request_id` identifies the outer request for log correlation.
+Each `results[].request_id` is queryable via `GET /v1/submissions/{request_id}`.
+
+### Rate limiting
+
+Rate limits are counted **per message**, not per bulk request.
+A bulk request of 10 messages consumes 10 units from each applicable bucket.
+If a rate limit is exhausted mid-array, earlier messages are unaffected;
+remaining messages are rejected with `code = "rate_limited"`.
+
+### Error responses
+
+| Condition | Status |
+|-----------|--------|
+| Empty `messages` array | 400 |
+| `messages` exceeds `max_bulk_messages` | 413 |
+| Unauthenticated | 401 |
+| Invalid API key | 403 |
+

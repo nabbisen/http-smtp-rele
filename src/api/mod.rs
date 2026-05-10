@@ -20,6 +20,7 @@ pub mod health;
 pub mod keys;
 pub mod metrics_handler;
 pub mod send;
+pub mod send_bulk;
 pub mod submissions;
 
 // ---------------------------------------------------------------------------
@@ -78,6 +79,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/v1/submissions/{request_id}", get(submissions::get_submission_status))
         .route("/v1/keys/self", get(keys::get_key_self))
         .route("/v1/send", axum::routing::post(send::send_mail))
+        .route("/v1/send-bulk", axum::routing::post(send_bulk::send_bulk))
         .layer(middleware::from_fn(request_id_layer))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::with_status_code(

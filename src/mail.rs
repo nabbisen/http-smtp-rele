@@ -173,6 +173,7 @@ mod tests {
                 max_recipients: 10,
                 max_attachments: 5,
                 max_attachment_bytes: 10 * 1024 * 1024,
+            max_bulk_messages: 10,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),

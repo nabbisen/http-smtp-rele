@@ -35,6 +35,42 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.9.0] — 2026-05-10
+
+### Theme: Bulk Submission
+
+### Added
+
+**`POST /v1/send-bulk` (RFC 701)**
+- Accepts array of independent mail messages (same schema as `POST /v1/send` per element)
+- Per-message pipeline: rate limit → validate → build → SMTP submit → status update
+- 202 Accepted with per-message `results` array regardless of individual outcomes
+- Partial success is supported: one failed message does not abort others
+- Each message gets its own `request_id` and status record
+- `bulk_request_id` in response for log correlation
+- `GET /v1/submissions/{request_id}` works per-message
+
+**Rate limiting per message (RFC 702)**
+- Global, IP, and per-key limits decremented once per message
+- Exhaustion mid-array: earlier messages unaffected, remainder rejected with `rate_limited`
+
+**`[mail].max_bulk_messages`** (default: `10`) — cap on messages per bulk request
+
+**`src/api/send_bulk.rs`** — new handler module
+
+### Docs
+
+- `docs/api.md`: `POST /v1/send-bulk` endpoint reference
+- `docs/configuration.md`: `max_bulk_messages` field documented
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 79 | 160 |
+
+---
+
 ## [0.8.0] — 2026-05-10
 
 ### Theme: SQLite Persistent Status Store
@@ -111,6 +147,42 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.9.0] — 2026-05-10
+
+### Theme: Bulk Submission
+
+### Added
+
+**`POST /v1/send-bulk` (RFC 701)**
+- Accepts array of independent mail messages (same schema as `POST /v1/send` per element)
+- Per-message pipeline: rate limit → validate → build → SMTP submit → status update
+- 202 Accepted with per-message `results` array regardless of individual outcomes
+- Partial success is supported: one failed message does not abort others
+- Each message gets its own `request_id` and status record
+- `bulk_request_id` in response for log correlation
+- `GET /v1/submissions/{request_id}` works per-message
+
+**Rate limiting per message (RFC 702)**
+- Global, IP, and per-key limits decremented once per message
+- Exhaustion mid-array: earlier messages unaffected, remainder rejected with `rate_limited`
+
+**`[mail].max_bulk_messages`** (default: `10`) — cap on messages per bulk request
+
+**`src/api/send_bulk.rs`** — new handler module
+
+### Docs
+
+- `docs/api.md`: `POST /v1/send-bulk` endpoint reference
+- `docs/configuration.md`: `max_bulk_messages` field documented
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 79 | 160 |
 
 ---
 
@@ -406,6 +478,42 @@ Restart required: `enabled`, `store`
 
 ---
 
+## [0.9.0] — 2026-05-10
+
+### Theme: Bulk Submission
+
+### Added
+
+**`POST /v1/send-bulk` (RFC 701)**
+- Accepts array of independent mail messages (same schema as `POST /v1/send` per element)
+- Per-message pipeline: rate limit → validate → build → SMTP submit → status update
+- 202 Accepted with per-message `results` array regardless of individual outcomes
+- Partial success is supported: one failed message does not abort others
+- Each message gets its own `request_id` and status record
+- `bulk_request_id` in response for log correlation
+- `GET /v1/submissions/{request_id}` works per-message
+
+**Rate limiting per message (RFC 702)**
+- Global, IP, and per-key limits decremented once per message
+- Exhaustion mid-array: earlier messages unaffected, remainder rejected with `rate_limited`
+
+**`[mail].max_bulk_messages`** (default: `10`) — cap on messages per bulk request
+
+**`src/api/send_bulk.rs`** — new handler module
+
+### Docs
+
+- `docs/api.md`: `POST /v1/send-bulk` endpoint reference
+- `docs/configuration.md`: `max_bulk_messages` field documented
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 79 | 160 |
+
+---
+
 ## [0.8.0] — 2026-05-10
 
 ### Theme: SQLite Persistent Status Store
@@ -482,6 +590,42 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.9.0] — 2026-05-10
+
+### Theme: Bulk Submission
+
+### Added
+
+**`POST /v1/send-bulk` (RFC 701)**
+- Accepts array of independent mail messages (same schema as `POST /v1/send` per element)
+- Per-message pipeline: rate limit → validate → build → SMTP submit → status update
+- 202 Accepted with per-message `results` array regardless of individual outcomes
+- Partial success is supported: one failed message does not abort others
+- Each message gets its own `request_id` and status record
+- `bulk_request_id` in response for log correlation
+- `GET /v1/submissions/{request_id}` works per-message
+
+**Rate limiting per message (RFC 702)**
+- Global, IP, and per-key limits decremented once per message
+- Exhaustion mid-array: earlier messages unaffected, remainder rejected with `rate_limited`
+
+**`[mail].max_bulk_messages`** (default: `10`) — cap on messages per bulk request
+
+**`src/api/send_bulk.rs`** — new handler module
+
+### Docs
+
+- `docs/api.md`: `POST /v1/send-bulk` endpoint reference
+- `docs/configuration.md`: `max_bulk_messages` field documented
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 79 | 160 |
 
 ---
 
