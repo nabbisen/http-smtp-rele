@@ -35,6 +35,66 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.12.0] — 2026-05-10
+
+### Theme: Documentation and Security Checklist
+
+No code changes. This release is documentation-only.
+
+### Added
+
+**mdbook documentation structure (RFC 731)**
+- `docs/book.toml` — mdbook configuration
+- `docs/src/SUMMARY.md` — persona-based navigation (13 chapters)
+- `docs/src/introduction.md` — project overview and feature table
+- `docs/src/guides/status-tracking.md` — end-to-end status tracking guide
+- `docs/src/guides/bulk-sending.md` — bulk send guide with curl examples
+- `docs/src/operations/reverse-proxy.md` — nginx / Caddy / relayd / HAProxy configs
+- `docs/src/development/contributing.md` — RFC process, code style, test expectations
+- Existing docs (`api.md`, `configuration.md`, `openbsd.md`, `security.md`,
+  `architecture.md`, `testing.md`, `getting-started.md`, `faq.md`)
+  copied into `docs/src/` hierarchy
+
+**Security checklist (RFC 732)**
+- `docs/src/operations/security-checklist.md` — 9-category pre-deployment checklist
+  - Authentication and API keys (5 items)
+  - Recipient and domain policy (3 items)
+  - Rate limiting (3 items)
+  - Network exposure (3 items)
+  - TLS and transport security (2 items)
+  - Logging and privacy (3 items)
+  - OpenBSD hardening (4 items, platform-conditional)
+  - Monitoring and alerting (3 items)
+  - Operations and incident response (3 items)
+  - Sign-off table
+
+### Documentation structure
+
+```
+docs/
+  book.toml
+  src/
+    SUMMARY.md           ← 13 chapters, all links verified
+    introduction.md
+    getting-started.md
+    faq.md
+    guides/
+      api-reference.md
+      configuration.md
+      status-tracking.md   ← new
+      bulk-sending.md      ← new
+    operations/
+      security-checklist.md ← new (RFC 732)
+      openbsd.md
+      reverse-proxy.md      ← new
+    development/
+      architecture.md
+      testing.md
+      contributing.md       ← new
+```
+
+---
+
 ## [0.11.0] — 2026-05-10
 
 ### Theme: Hardening Correctness and Shared State
@@ -237,6 +297,66 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.12.0] — 2026-05-10
+
+### Theme: Documentation and Security Checklist
+
+No code changes. This release is documentation-only.
+
+### Added
+
+**mdbook documentation structure (RFC 731)**
+- `docs/book.toml` — mdbook configuration
+- `docs/src/SUMMARY.md` — persona-based navigation (13 chapters)
+- `docs/src/introduction.md` — project overview and feature table
+- `docs/src/guides/status-tracking.md` — end-to-end status tracking guide
+- `docs/src/guides/bulk-sending.md` — bulk send guide with curl examples
+- `docs/src/operations/reverse-proxy.md` — nginx / Caddy / relayd / HAProxy configs
+- `docs/src/development/contributing.md` — RFC process, code style, test expectations
+- Existing docs (`api.md`, `configuration.md`, `openbsd.md`, `security.md`,
+  `architecture.md`, `testing.md`, `getting-started.md`, `faq.md`)
+  copied into `docs/src/` hierarchy
+
+**Security checklist (RFC 732)**
+- `docs/src/operations/security-checklist.md` — 9-category pre-deployment checklist
+  - Authentication and API keys (5 items)
+  - Recipient and domain policy (3 items)
+  - Rate limiting (3 items)
+  - Network exposure (3 items)
+  - TLS and transport security (2 items)
+  - Logging and privacy (3 items)
+  - OpenBSD hardening (4 items, platform-conditional)
+  - Monitoring and alerting (3 items)
+  - Operations and incident response (3 items)
+  - Sign-off table
+
+### Documentation structure
+
+```
+docs/
+  book.toml
+  src/
+    SUMMARY.md           ← 13 chapters, all links verified
+    introduction.md
+    getting-started.md
+    faq.md
+    guides/
+      api-reference.md
+      configuration.md
+      status-tracking.md   ← new
+      bulk-sending.md      ← new
+    operations/
+      security-checklist.md ← new (RFC 732)
+      openbsd.md
+      reverse-proxy.md      ← new
+    development/
+      architecture.md
+      testing.md
+      contributing.md       ← new
+```
 
 ---
 
@@ -658,6 +778,66 @@ Restart required: `enabled`, `store`
 
 ---
 
+## [0.12.0] — 2026-05-10
+
+### Theme: Documentation and Security Checklist
+
+No code changes. This release is documentation-only.
+
+### Added
+
+**mdbook documentation structure (RFC 731)**
+- `docs/book.toml` — mdbook configuration
+- `docs/src/SUMMARY.md` — persona-based navigation (13 chapters)
+- `docs/src/introduction.md` — project overview and feature table
+- `docs/src/guides/status-tracking.md` — end-to-end status tracking guide
+- `docs/src/guides/bulk-sending.md` — bulk send guide with curl examples
+- `docs/src/operations/reverse-proxy.md` — nginx / Caddy / relayd / HAProxy configs
+- `docs/src/development/contributing.md` — RFC process, code style, test expectations
+- Existing docs (`api.md`, `configuration.md`, `openbsd.md`, `security.md`,
+  `architecture.md`, `testing.md`, `getting-started.md`, `faq.md`)
+  copied into `docs/src/` hierarchy
+
+**Security checklist (RFC 732)**
+- `docs/src/operations/security-checklist.md` — 9-category pre-deployment checklist
+  - Authentication and API keys (5 items)
+  - Recipient and domain policy (3 items)
+  - Rate limiting (3 items)
+  - Network exposure (3 items)
+  - TLS and transport security (2 items)
+  - Logging and privacy (3 items)
+  - OpenBSD hardening (4 items, platform-conditional)
+  - Monitoring and alerting (3 items)
+  - Operations and incident response (3 items)
+  - Sign-off table
+
+### Documentation structure
+
+```
+docs/
+  book.toml
+  src/
+    SUMMARY.md           ← 13 chapters, all links verified
+    introduction.md
+    getting-started.md
+    faq.md
+    guides/
+      api-reference.md
+      configuration.md
+      status-tracking.md   ← new
+      bulk-sending.md      ← new
+    operations/
+      security-checklist.md ← new (RFC 732)
+      openbsd.md
+      reverse-proxy.md      ← new
+    development/
+      architecture.md
+      testing.md
+      contributing.md       ← new
+```
+
+---
+
 ## [0.11.0] — 2026-05-10
 
 ### Theme: Hardening Correctness and Shared State
@@ -860,6 +1040,66 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.12.0] — 2026-05-10
+
+### Theme: Documentation and Security Checklist
+
+No code changes. This release is documentation-only.
+
+### Added
+
+**mdbook documentation structure (RFC 731)**
+- `docs/book.toml` — mdbook configuration
+- `docs/src/SUMMARY.md` — persona-based navigation (13 chapters)
+- `docs/src/introduction.md` — project overview and feature table
+- `docs/src/guides/status-tracking.md` — end-to-end status tracking guide
+- `docs/src/guides/bulk-sending.md` — bulk send guide with curl examples
+- `docs/src/operations/reverse-proxy.md` — nginx / Caddy / relayd / HAProxy configs
+- `docs/src/development/contributing.md` — RFC process, code style, test expectations
+- Existing docs (`api.md`, `configuration.md`, `openbsd.md`, `security.md`,
+  `architecture.md`, `testing.md`, `getting-started.md`, `faq.md`)
+  copied into `docs/src/` hierarchy
+
+**Security checklist (RFC 732)**
+- `docs/src/operations/security-checklist.md` — 9-category pre-deployment checklist
+  - Authentication and API keys (5 items)
+  - Recipient and domain policy (3 items)
+  - Rate limiting (3 items)
+  - Network exposure (3 items)
+  - TLS and transport security (2 items)
+  - Logging and privacy (3 items)
+  - OpenBSD hardening (4 items, platform-conditional)
+  - Monitoring and alerting (3 items)
+  - Operations and incident response (3 items)
+  - Sign-off table
+
+### Documentation structure
+
+```
+docs/
+  book.toml
+  src/
+    SUMMARY.md           ← 13 chapters, all links verified
+    introduction.md
+    getting-started.md
+    faq.md
+    guides/
+      api-reference.md
+      configuration.md
+      status-tracking.md   ← new
+      bulk-sending.md      ← new
+    operations/
+      security-checklist.md ← new (RFC 732)
+      openbsd.md
+      reverse-proxy.md      ← new
+    development/
+      architecture.md
+      testing.md
+      contributing.md       ← new
+```
 
 ---
 

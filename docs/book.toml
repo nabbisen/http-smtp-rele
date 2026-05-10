@@ -1,0 +1,9 @@
+[book]
+title    = "http-smtp-rele"
+authors  = ["nabbisen"]
+language = "en"
+src      = "src"
+
+[output.html]
+git-repository-url = "https://github.com/nabbisen/http-smtp-rele"
+fold.enable = true

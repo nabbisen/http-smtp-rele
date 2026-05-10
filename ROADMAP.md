@@ -101,3 +101,8 @@ Core HTTP-to-SMTP relay with security hardening.
 
 - OpenBSD SIGHUP rpath fix (RFC 721)
 - Redis/Valkey shared status store, optional --features redis (RFC 722)
+
+## v0.12.0 — Shipped (2026-05-10)
+
+- mdbook documentation structure (RFC 731)
+- Security checklist (RFC 732)

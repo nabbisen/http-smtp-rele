@@ -97,6 +97,14 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 721 | [OpenBSD SIGHUP rpath Fix](./done/721-openbsd-sighup-rpath.md) |
 | 722 | [Redis/Valkey Shared Status Store](./done/722-redis-valkey-status-store.md) |
 
+### v0.12 — Documentation and Security Checklist
+
+| ID  | Title |
+|-----|-------|
+| 730 | [v0.12 Development Plan](./done/730-v012-development-plan.md) |
+| 731 | [mdbook Documentation Structure](./done/731-mdbook-structure.md) |
+| 732 | [Security Checklist](./done/732-security-checklist.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
