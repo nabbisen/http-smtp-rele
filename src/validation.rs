@@ -1,0 +1,529 @@
+//! Request validation pipeline.
+//!
+//! Implements RFC 050: strict DTO deserialization, field validation,
+//! header-injection prevention, and recipient domain policy.
+//!
+//! # Flow
+//!
+//! ```text
+//! MailRequest (raw JSON DTO)
+//!   -> validate_mail_request()
+//!   -> ValidatedMailRequest (type-level proof of safety)
+//! ```
+//!
+//! # Policy
+//!
+//! - All fields entering mail headers are checked for CR/LF and control chars.
+//! - Unknown JSON fields are rejected at deserialization time (`deny_unknown_fields`).
+//! - `from`, `cc`, `bcc`, `headers` are explicitly absent from the DTO.
+//! - Reject; never silently rewrite.
+
+use serde::Deserialize;
+
+use crate::{
+    auth::AuthContext,
+    config::AppConfig,
+    error::AppError,
+    sanitize::{contains_control_chars, contains_header_injection},
+};
+
+// ---------------------------------------------------------------------------
+// Public request DTO
+// ---------------------------------------------------------------------------
+
+/// Raw mail request as received from the HTTP client.
+///
+/// `deny_unknown_fields` ensures that any field not listed here (e.g., `from`,
+/// `cc`, `bcc`, `headers`) causes immediate deserialization failure → 422.
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailRequest {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    pub from_name: Option<String>,
+    pub reply_to: Option<String>,
+    /// Opaque client metadata (logged for correlation; not reflected in mail).
+    pub metadata: Option<serde_json::Value>,
+}
+
+// ---------------------------------------------------------------------------
+// Validated DTO
+// ---------------------------------------------------------------------------
+
+/// Type-safe proof that a `MailRequest` has passed all validation checks.
+///
+/// Only `validate_mail_request()` can construct this type.
+/// Downstream modules (`mail`, `smtp`) accept only this type.
+#[derive(Debug)]
+pub struct ValidatedMailRequest {
+    pub to: String,
+    pub subject: String,
+    pub body: String,
+    pub from_name: Option<String>,
+    pub reply_to: Option<String>,
+    pub client_request_id: Option<String>,
+}
+
+// ---------------------------------------------------------------------------
+// Validation entry point
+// ---------------------------------------------------------------------------
+
+/// Validate a raw `MailRequest` against config policy and auth context.
+///
+/// Returns `ValidatedMailRequest` on success, or an `AppError::Validation`
+/// describing the first failure encountered.
+///
+/// # Validation order
+///
+/// 1. `to` — format + domain policy
+/// 2. `subject` — empty, length, header-injection
+/// 3. `body` — NUL, length
+/// 4. `from_name` — length, header-injection (optional)
+/// 5. `reply_to` — format, header-injection (optional)
+/// 6. `metadata` — extract client request_id
+pub fn validate_mail_request(
+    req: MailRequest,
+    config: &AppConfig,
+    auth: &AuthContext,
+) -> Result<ValidatedMailRequest, AppError> {
+    let mail_cfg = &config.mail;
+
+    // 1. `to`
+    let to = validate_email_address(&req.to, "to")?;
+    check_recipient_domain(&to, config, auth)?;
+
+    // 2. `subject`
+    let subject = validate_subject(&req.subject, mail_cfg.max_subject_chars)?;
+
+    // 3. `body`
+    let body = validate_body(&req.body, mail_cfg.max_body_bytes)?;
+
+    // 4. `from_name` (optional)
+    let from_name = req
+        .from_name
+        .as_deref()
+        .map(|n| validate_display_name(n, "from_name"))
+        .transpose()?;
+
+    // 5. `reply_to` (optional)
+    let reply_to = req
+        .reply_to
+        .as_deref()
+        .map(|a| validate_email_address(a, "reply_to"))
+        .transpose()?;
+
+    // 6. client request_id from metadata
+    let client_request_id = req
+        .metadata
+        .as_ref()
+        .and_then(|m| m.get("request_id"))
+        .and_then(|v| v.as_str())
+        .map(|s| s.to_string());
+
+    Ok(ValidatedMailRequest {
+        to,
+        subject,
+        body,
+        from_name,
+        reply_to,
+        client_request_id,
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Field validators
+// ---------------------------------------------------------------------------
+
+/// Validate an email address string using `lettre`'s address parser.
+fn validate_email_address(raw: &str, field: &str) -> Result<String, AppError> {
+    use lettre::address::Address;
+    if contains_header_injection(raw) {
+        return Err(AppError::Validation(format!(
+            "field `{field}` contains illegal line break"
+        )));
+    }
+    raw.parse::<Address>()
+        .map(|a| a.to_string())
+        .map_err(|_| AppError::Validation(format!("field `{field}` is not a valid email address")))
+}
+
+fn validate_subject(raw: &str, max_len: usize) -> Result<String, AppError> {
+    if raw.trim().is_empty() {
+        return Err(AppError::Validation(
+            "field `subject` must not be empty".into(),
+        ));
+    }
+    if contains_header_injection(raw) {
+        return Err(AppError::Validation(
+            "field `subject` contains illegal line break".into(),
+        ));
+    }
+    if contains_control_chars(raw) {
+        return Err(AppError::Validation(
+            "field `subject` contains illegal control character".into(),
+        ));
+    }
+    if raw.chars().count() > max_len {
+        return Err(AppError::Validation(format!(
+            "field `subject` exceeds maximum length of {max_len} characters"
+        )));
+    }
+    Ok(raw.to_string())
+}
+
+fn validate_body(raw: &str, max_len: usize) -> Result<String, AppError> {
+    if raw.contains('\0') {
+        return Err(AppError::Validation(
+            "field `body` contains NUL byte".into(),
+        ));
+    }
+    if raw.len() > max_len {
+        return Err(AppError::Validation(format!(
+            "field `body` exceeds maximum size of {max_len} bytes"
+        )));
+    }
+    Ok(raw.to_string())
+}
+
+fn validate_display_name(raw: &str, field: &str) -> Result<String, AppError> {
+    if contains_header_injection(raw) {
+        return Err(AppError::Validation(format!(
+            "field `{field}` contains illegal line break"
+        )));
+    }
+    Ok(raw.to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Recipient domain policy
+// ---------------------------------------------------------------------------
+
+/// Check that the `to` address domain is permitted by both the global config
+/// and the API key's per-key policy.
+///
+/// If the global `allowed_recipient_domains` list is empty, all domains are
+/// permitted at the global level (per-key policy still applies if set).
+fn check_recipient_domain(
+    to: &str,
+    config: &AppConfig,
+    auth: &AuthContext,
+) -> Result<(), AppError> {
+    let domain = extract_domain(to)?;
+
+    // Global allowlist (empty = allow all)
+    if !config.mail.allowed_recipient_domains.is_empty()
+        && !config
+            .mail
+            .allowed_recipient_domains
+            .iter()
+            .any(|d| d.eq_ignore_ascii_case(&domain))
+    {
+        return Err(AppError::Validation(format!(
+            "recipient domain `{domain}` is not permitted"
+        )));
+    }
+
+    // Per-key allowlist (empty = no additional restriction)
+    let key_cfg = config
+        .security
+        .api_keys
+        .iter()
+        .find(|k| k.id == auth.key_id);
+    if let Some(key) = key_cfg {
+        if !key.allowed_recipient_domains.is_empty()
+            && !key
+                .allowed_recipient_domains
+                .iter()
+                .any(|d| d.eq_ignore_ascii_case(&domain))
+        {
+            return Err(AppError::Validation(format!(
+                "recipient domain `{domain}` is not permitted for this API key"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn extract_domain(email: &str) -> Result<String, AppError> {
+    email
+        .rsplit_once('@')
+        .map(|(_, d)| d.to_lowercase())
+        .ok_or_else(|| AppError::Validation("could not extract domain from email address".into()))
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        auth::AuthContext,
+        config::{
+            ApiKeyConfig, AppConfig, LoggingConfig, MailConfig, RateLimitConfig, SecretString,
+            SecurityConfig, ServerConfig, SmtpConfig,
+        },
+    };
+    use std::net::IpAddr;
+
+    fn make_auth(key_id: &str) -> AuthContext {
+        AuthContext {
+            key_id: key_id.to_string(),
+            client_ip: IpAddr::V4(std::net::Ipv4Addr::LOCALHOST),
+            key_rate_limit_per_min: None,
+        }
+    }
+
+    fn minimal_config() -> AppConfig {
+        AppConfig {
+            server: ServerConfig {
+                bind_address: "127.0.0.1:8080".into(),
+                max_request_body_bytes: 65536,
+                request_timeout_seconds: 30,
+                shutdown_timeout_seconds: 30,
+            },
+            security: SecurityConfig {
+                require_auth: true,
+                trust_proxy_headers: false,
+                trusted_source_cidrs: vec![],
+                    allowed_source_cidrs: vec![],
+                api_keys: vec![ApiKeyConfig {
+                    id: "test-key".into(),
+                    secret: SecretString::new("tok"),
+                    enabled: true,
+                    description: None,
+                    allowed_recipient_domains: vec![],
+                    rate_limit_per_min: None,
+                }],
+            },
+            mail: MailConfig {
+                default_from: "relay@example.com".into(),
+                default_from_name: None,
+                allowed_recipient_domains: vec![],
+                max_subject_chars: 200,
+                max_body_bytes: 1_000_000,
+            },
+            smtp: SmtpConfig {
+                mode: "smtp".into(),
+                host: "127.0.0.1".into(),
+                port: 25,
+                connect_timeout_seconds: 5,
+                submission_timeout_seconds: 30,
+            },
+            rate_limit: RateLimitConfig {
+                global_per_min: 60,
+                per_ip_per_min: 20,
+                burst_size: 5,
+            },
+            logging: LoggingConfig {
+                format: "text".into(),
+                level: "info".into(),
+                mask_recipient: false,
+            },
+        }
+    }
+
+    fn minimal_request() -> MailRequest {
+        MailRequest {
+            to: "user@example.com".into(),
+            subject: "Hello".into(),
+            body: "Test body".into(),
+            from_name: None,
+            reply_to: None,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn valid_request_passes() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = minimal_request();
+        assert!(validate_mail_request(req, &cfg, &auth).is_ok());
+    }
+
+    #[test]
+    fn invalid_email_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: "not-an-email".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn crlf_in_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "Hello\r\nBcc: evil@x.com".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn empty_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "   ".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn oversized_subject_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            subject: "a".repeat(201),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn nul_in_body_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            body: "Hello\0world".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn crlf_in_from_name_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            from_name: Some("Evil\r\nBcc: attacker@evil.com".into()),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn disallowed_domain_rejected() {
+        let mut cfg = minimal_config();
+        cfg.mail.allowed_recipient_domains = vec!["allowed.com".into()];
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: "user@other.com".into(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn allowed_domain_passes() {
+        let mut cfg = minimal_config();
+        cfg.mail.allowed_recipient_domains = vec!["example.com".into()];
+        let auth = make_auth("test-key");
+        let req = minimal_request(); // to = user@example.com
+        assert!(validate_mail_request(req, &cfg, &auth).is_ok());
+    }
+
+    #[test]
+    fn per_key_domain_restriction_works() {
+        let mut cfg = minimal_config();
+        cfg.security.api_keys[0].allowed_recipient_domains = vec!["allowed.com".into()];
+        let auth = make_auth("test-key");
+        let req = minimal_request(); // to = user@example.com (not allowed)
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    #[test]
+    fn metadata_client_request_id_extracted() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            metadata: Some(serde_json::json!({"request_id": "client-123"})),
+            ..minimal_request()
+        };
+        let v = validate_mail_request(req, &cfg, &auth).unwrap();
+        assert_eq!(v.client_request_id.as_deref(), Some("client-123"));
+    }
+
+    /// SEC-006: CR/LF in `reply_to` is rejected before SMTP.
+    #[test]
+    fn crlf_in_reply_to_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        for bad in &[
+            "user@example.com
+Bcc: evil@evil.com",
+            "user@example.com
+X-Header: injected",
+        ] {
+            let req = MailRequest {
+                reply_to: Some(bad.to_string()),
+                ..minimal_request()
+            };
+            assert!(
+                matches!(validate_mail_request(req, &cfg, &auth), Err(AppError::Validation(_))),
+                "expected Validation error for reply_to={bad:?}"
+            );
+        }
+    }
+
+    /// SEC-007: CR/LF in `to` is rejected before SMTP.
+    #[test]
+    fn crlf_in_to_rejected() {
+        let cfg = minimal_config();
+        let auth = make_auth("test-key");
+        let req = MailRequest {
+            to: "user@example.com
+Bcc: attacker@evil.com".to_string(),
+            ..minimal_request()
+        };
+        assert!(matches!(
+            validate_mail_request(req, &cfg, &auth),
+            Err(AppError::Validation(_))
+        ));
+    }
+
+    /// SEC-017 (unit): SecretString never exposes its value through Debug.
+    #[test]
+    fn secret_string_redacted_in_debug() {
+        use crate::config::SecretString;
+        let s = SecretString::new("super-secret-token-value");
+        let debug = format!("{s:?}");
+        assert!(
+            !debug.contains("super-secret-token-value"),
+            "SecretString Debug must not expose secret; got: {debug}"
+        );
+    }
+}

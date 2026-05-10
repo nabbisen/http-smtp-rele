@@ -1,0 +1,112 @@
+# http-smtp-rele — example configuration
+#
+# Copy to /etc/http-smtp-rele.toml and edit before starting the service.
+# Mandatory fields to change: [mail].default_from, [[api_keys]].secret
+
+# ── HTTP server ───────────────────────────────────────────────────────────────
+
+[server]
+# Listen address. Default: loopback-only.
+# Never bind 0.0.0.0 without a firewall or reverse-proxy restriction in front.
+bind_address = "127.0.0.1:8080"
+
+# Maximum request body size in bytes. Requests over this limit receive 413.
+max_request_body_bytes = 1048576   # 1 MiB
+
+# Request processing timeout in seconds (wall-clock from accept to response).
+request_timeout_seconds = 30
+
+# ── Security ──────────────────────────────────────────────────────────────────
+
+[security]
+# CIDRs from which connections are permitted at all (empty = allow all).
+# Applied after IP resolution; independent of proxy header trust.
+# allowed_source_cidrs = ["10.0.0.0/8", "127.0.0.0/8"]
+allowed_source_cidrs = []
+
+# CIDRs whose X-Forwarded-For headers may be trusted for client IP resolution.
+# Only used when trust_proxy_headers = true.
+trusted_source_cidrs = []
+
+# Read X-Forwarded-For to resolve client IP.
+# Applies only when the peer IP is listed in trusted_source_cidrs.
+trust_proxy_headers = false
+
+# ── API keys ──────────────────────────────────────────────────────────────────
+#
+# Generate a secret with: openssl rand -base64 32
+#
+# TOML field: id  (scoped under [[api_keys]])
+# Log/context field: key_id  (same value; renamed for clarity in log output)
+
+[[api_keys]]
+id      = "default"
+secret  = "CHANGE_ME_generate_a_random_secret_here"
+enabled = true
+# Optional: restrict this key to specific recipient domains.
+# allowed_recipient_domains = ["example.com"]
+# Optional: per-key rate limit (tokens/minute). 0 or absent = inherit global default.
+# rate_limit_per_min = 0
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+
+[rate_limit]
+# Maximum requests per minute across all clients combined.
+global_per_min  = 60
+# Maximum requests per minute from a single source IP.
+per_ip_per_min  = 20
+# Burst capacity: number of tokens a fresh bucket starts with (shared across all tiers).
+burst_size = 5
+
+# ── Mail policy ───────────────────────────────────────────────────────────────
+
+[mail]
+# From address used for all outgoing mail.
+# Clients cannot override this — it is always taken from config.
+default_from = "noreply@example.com"
+
+# Optional display name for the From header.
+# default_from_name = "Example Notifications"
+
+# Allowlist of recipient domains. Empty = allow any domain.
+# SECURITY: leaving this empty creates an open relay for any domain.
+# Always restrict to your own domains in production.
+allowed_recipient_domains = ["example.com"]
+
+# Maximum subject length in UTF-8 characters.
+max_subject_chars = 255
+
+# Maximum body size in bytes (must be ≤ max_request_body_bytes).
+max_body_bytes = 524288   # 512 KiB
+
+
+# ── SMTP server ───────────────────────────────────────────────────────────────
+
+[smtp]
+# Submission mode. Only "smtp" is supported in MVP.
+# "pipe" is reserved for a future release (RFC 064) and will fail at startup.
+mode = "smtp"
+
+# SMTP relay host. On OpenBSD with OpenSMTPD: 127.0.0.1
+# Must be an IP address, not a hostname, on OpenBSD (pledge restricts DNS).
+host = "127.0.0.1"
+
+# SMTP port. OpenSMTPD default: 25
+port = 25
+
+# TCP connect timeout in seconds.
+connect_timeout_seconds = 5
+
+# Full SMTP session timeout in seconds.
+submission_timeout_seconds = 30
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+[logging]
+# Log level: trace, debug, info, warn, error
+# RUST_LOG environment variable overrides this setting.
+level = "info"
+# Output format: "text" (human-readable) or "json" (for log aggregators)
+format = "text"
+# When true, log only the recipient domain instead of the full address.
+mask_recipient = true

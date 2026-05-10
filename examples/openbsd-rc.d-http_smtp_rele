@@ -1,0 +1,32 @@
+#!/bin/ksh
+# examples/openbsd-rc.d-http_smtp_rele
+#
+# OpenBSD rc.d(8) control script for http-smtp-rele.
+#
+# Installation:
+#   cp examples/openbsd-rc.d-http_smtp_rele /etc/rc.d/http_smtp_rele
+#   chmod 555 /etc/rc.d/http_smtp_rele
+#   rcctl enable http_smtp_rele
+#   rcctl start  http_smtp_rele
+
+daemon="/usr/local/bin/http-smtp-rele"
+daemon_user="_http_smtp_rele"
+daemon_flags="--config /etc/http-smtp-rele.toml"
+
+. /etc/rc.d/rc.subr
+
+# Do not send SIGHUP to reload config — restart is required.
+rc_reload=NO
+
+rc_pre() {
+    if [ ! -f /etc/http-smtp-rele.toml ]; then
+        echo "${0##*/}: /etc/http-smtp-rele.toml not found" >&2
+        return 1
+    fi
+    if [ ! -x "${daemon}" ]; then
+        echo "${0##*/}: ${daemon} not found or not executable" >&2
+        return 1
+    fi
+}
+
+rc_cmd "$1"

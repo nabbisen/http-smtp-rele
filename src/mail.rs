@@ -1,0 +1,209 @@
+//! Safe plain text mail construction.
+//!
+//! Implements RFC 060–061: constructs a `lettre::Message` from a
+//! `ValidatedMailRequest`. Raw string concatenation is never used.
+//!
+//! # From address policy (RFC 061)
+//!
+//! `From` is always taken from `config.mail.default_from`.
+//! The request cannot override it.
+//! Display name comes from the request's `from_name`, falling back to
+//! `config.mail.default_from_name`.
+
+use lettre::{
+    message::{header::ContentType, Mailbox},
+    Message,
+};
+use tracing::error;
+
+use crate::{config::AppConfig, error::AppError, validation::ValidatedMailRequest};
+
+/// Build a `lettre::Message` from a validated request and server config.
+///
+/// # From policy
+///
+/// The `From` address is always `config.mail.default_from`.
+/// The display name is taken from `validated.from_name` if present,
+/// otherwise from `config.mail.default_from_name`.
+pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Result<Message, AppError> {
+    let mail_cfg = &config.mail;
+
+    // From address — always from config.
+    let from_addr = mail_cfg
+        .default_from
+        .parse::<lettre::Address>()
+        .map_err(|e| {
+            error!(error = %e, "invalid default_from config");
+            AppError::Internal
+        })?;
+
+    // Display name: request > config default.
+    let from_name = validated
+        .from_name
+        .as_deref()
+        .or(mail_cfg.default_from_name.as_deref());
+
+    let from_mailbox = match from_name {
+        Some(name) => Mailbox::new(Some(name.to_string()), from_addr),
+        None => Mailbox::new(None, from_addr),
+    };
+
+    // To address.
+    let to_mailbox: Mailbox = validated
+        .to
+        .parse()
+        .map_err(|e| {
+            error!(error = %e, "invalid to address after validation");
+            AppError::Internal
+        })?;
+
+    // Build message.
+    let mut builder = Message::builder()
+        .from(from_mailbox)
+        .to(to_mailbox)
+        .subject(validated.subject.clone())
+        .header(ContentType::TEXT_PLAIN);
+
+    // Reply-To (optional).
+    if let Some(reply_to) = validated.reply_to.as_deref() {
+        let rt_mailbox: Mailbox = reply_to
+            .parse()
+            .map_err(|e| {
+                error!(error = %e, "invalid reply_to after validation");
+                AppError::Internal
+            })?;
+        builder = builder.reply_to(rt_mailbox);
+    }
+
+    let message = builder
+        .body(validated.body.clone())
+        .map_err(|e| {
+            error!(error = %e, "failed to build mail message");
+            AppError::Internal
+        })?;
+
+    Ok(message)
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        config::{
+            ApiKeyConfig, AppConfig, LoggingConfig, MailConfig, RateLimitConfig, SecretString,
+            SecurityConfig, ServerConfig, SmtpConfig,
+        },
+        validation::ValidatedMailRequest,
+    };
+
+    fn minimal_config() -> AppConfig {
+        AppConfig {
+            server: ServerConfig {
+                bind_address: "127.0.0.1:8080".into(),
+                max_request_body_bytes: 65536,
+                request_timeout_seconds: 30,
+                shutdown_timeout_seconds: 30,
+            },
+            security: SecurityConfig {
+                require_auth: true,
+                trust_proxy_headers: false,
+                trusted_source_cidrs: vec![],
+                api_keys: vec![ApiKeyConfig {
+                    id: "test".into(),
+                    secret: SecretString::new("tok"),
+                    enabled: true,
+                    description: None,
+                    allowed_recipient_domains: vec![],
+                    rate_limit_per_min: None,
+                }],
+                allowed_source_cidrs: vec![],
+            },
+            mail: MailConfig {
+                default_from: "relay@example.com".into(),
+                default_from_name: Some("Relay".into()),
+                allowed_recipient_domains: vec![],
+                max_subject_chars: 200,
+                max_body_bytes: 1_000_000,
+            },
+            smtp: SmtpConfig {
+                mode: "smtp".into(),
+                host: "127.0.0.1".into(),
+                port: 25,
+                connect_timeout_seconds: 5,
+                submission_timeout_seconds: 30,
+            },
+            rate_limit: RateLimitConfig {
+                global_per_min: 60,
+                per_ip_per_min: 20,
+                burst_size: 5,
+            },
+            logging: LoggingConfig {
+                format: "text".into(),
+                level: "info".into(),
+                mask_recipient: false,
+            },
+        }
+    }
+
+    fn minimal_validated() -> ValidatedMailRequest {
+        ValidatedMailRequest {
+            to: "user@example.com".into(),
+            subject: "Hello".into(),
+            body: "Test body.".into(),
+            from_name: None,
+            reply_to: None,
+            client_request_id: None,
+        }
+    }
+
+    #[test]
+    fn valid_message_builds() {
+        let cfg = minimal_config();
+        let v = minimal_validated();
+        assert!(build_message(&v, &cfg).is_ok());
+    }
+
+    #[test]
+    fn from_is_always_from_config() {
+        let cfg = minimal_config();
+        let v = minimal_validated();
+        let msg = build_message(&v, &cfg).unwrap();
+        let from = msg.headers().get::<lettre::message::header::From>().unwrap();
+        assert!(format!("{:?}", from).contains("relay@example.com"));
+    }
+
+    #[test]
+    fn from_name_applied_from_request() {
+        let cfg = minimal_config();
+        let v = ValidatedMailRequest {
+            from_name: Some("Custom Name".into()),
+            ..minimal_validated()
+        };
+        let msg = build_message(&v, &cfg).unwrap();
+        let from = msg.headers().get::<lettre::message::header::From>().unwrap();
+        assert!(format!("{:?}", from).contains("Custom Name"));
+    }
+
+    #[test]
+    fn reply_to_applied_when_present() {
+        let cfg = minimal_config();
+        let v = ValidatedMailRequest {
+            reply_to: Some("support@example.com".into()),
+            ..minimal_validated()
+        };
+        let msg = build_message(&v, &cfg).unwrap();
+        assert!(msg.headers().get::<lettre::message::header::ReplyTo>().is_some());
+    }
+
+    #[test]
+    fn no_reply_to_when_absent() {
+        let cfg = minimal_config();
+        let v = minimal_validated();
+        let msg = build_message(&v, &cfg).unwrap();
+        assert!(msg.headers().get::<lettre::message::header::ReplyTo>().is_none());
+    }
+}
