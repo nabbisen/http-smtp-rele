@@ -35,6 +35,98 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.3.0] — 2026-05-10
+
+### Added
+
+**SMTP AUTH (RFC 301)**
+- `[smtp].auth_user` and `[smtp].auth_password` (stored as `SecretString`) for
+  non-localhost relay servers that require credentials
+- lettre `Credentials` injected into the SMTP transport when both fields are set
+- Config validation: both must be set together or both absent; incompatible with pipe mode
+
+**Multi-recipient `to` (RFC 302)**
+- `to` field now accepts a JSON string or array: `"alice@b.com"` or `["a@b.com","c@d.com"]`
+- All recipients are validated and policy-checked independently
+- `mail.max_recipients` config field (default 10) caps the array length
+- `lettre::Message` gets a `.to()` call per recipient
+
+**W3C `Forwarded` header (RFC 303)**
+- `parse_forwarded_for()` in `auth.rs` parses RFC 7239 `Forwarded: for=<addr>`
+- Preferred over `X-Forwarded-For` when both headers are present
+- Handles IPv6 addresses in brackets; falls back gracefully on malformed values
+
+**Sendmail pipe mode (RFC 304)**
+- `smtp.mode = "pipe"` now works; `smtp.pipe_command` (default `/usr/sbin/sendmail`)
+- `submit_pipe()` in `smtp.rs` spawns the command, pipes the formatted message to stdin,
+  and maps non-zero exit codes to `502 smtp_unavailable`
+- OpenBSD: pipe mode uses `pledge("stdio exec proc")` + `unveil(pipe_command, "x")`
+  instead of `pledge("stdio inet")` used in SMTP relay mode
+- `main.rs` selects `RuntimeMode` based on `smtp.mode` at startup
+
+**SIGHUP config reload (RFC 305)**
+- On `SIGHUP`, the config file is re-read and validated atomically
+- `AppState.config` is now `arc_swap::ArcSwap<AppConfig>` — all handlers read via `.load()`
+- Invalid config on SIGHUP is logged and the current config is kept
+- Primarily useful on Linux; on OpenBSD, `pledge("stdio inet")` prevents file re-read
+
+### Changed
+
+- `AppState.config` type: `Arc<AppConfig>` → `arc_swap::ArcSwap<AppConfig>`
+  (callers use `.load()` to get a snapshot `Arc<AppConfig>`)
+- `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
+- `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
+- `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.3.0] — 2026-05-10
+
+### Added
+
+**W3C Forwarded header (RFC 303)**
+- `parse_forwarded_for()` in `auth.rs` — RFC 7239 `Forwarded: for=<addr>` header support
+- Takes precedence over `X-Forwarded-For` when both headers are present
+- Handles IPv4, IPv6 (bracket notation), and multi-param `Forwarded` values
+
+**SMTP AUTH (RFC 301)**
+- `[smtp].auth_user` and `[smtp].auth_password` (stored as `SecretString`)
+- SMTP AUTH injected via `lettre::Credentials` when both fields are set
+- `auth_password` never logged; startup validation requires both or neither
+- Not applicable when `smtp.mode = "pipe"` (validated at startup)
+
+**Multi-recipient `to` (RFC 302)**
+- `to` field accepts a JSON string `"a@x.com"` or array `["a@x.com","b@x.com"]`
+- `Recipients` serde deserializer handles both forms transparently
+- All recipients validated independently: address format, CR/LF, domain policy
+- `[mail].max_recipients` cap (default 10) prevents abuse
+- `lettre::Message::builder().to()` called once per recipient
+
+**Sendmail pipe mode (RFC 304)**
+- `[smtp].mode = "pipe"` — submits mail via `sendmail -t` instead of direct TCP
+- `[smtp].pipe_command` — configurable path (default `/usr/sbin/sendmail`)
+- Subprocess stdin receives RFC 5322 formatted message; exit code checked
+- Timeout enforced via `tokio::time::timeout`
+- OpenBSD: pledge changes to `"stdio exec proc"` with `unveil(pipe_command, "x")`
+- `mode = "smtp"` pledge unchanged: `"stdio inet"`
+
+**SIGHUP config reload (RFC 305)**
+- `kill -HUP <pid>` reloads config from the original path without restart
+- `AppState.config_store: ArcSwap<AppConfig>` — atomic hot-swap via `arc-swap` crate
+- `AppState::config()` — returns current `Arc<AppConfig>` snapshot per request
+- `AppState::reload_config()` — atomically replaces the stored config
+- Invalid config on SIGHUP: logged as error, current config unchanged
+- In-flight requests are not interrupted during reload
+- OpenBSD note: `pledge("stdio inet")` excludes `rpath` — SIGHUP reload is only
+  supported on non-OpenBSD or when pledge is not active
+
+### Changed
+
+- `AppState.config` field replaced by `config()` and `reload_config()` methods
+- `smtp.rs::build_transport` now injects SMTP AUTH credentials when configured
+
+---
+
 ## [0.2.0] — 2026-05-10
 
 ### Added

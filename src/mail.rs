@@ -48,19 +48,16 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
         None => Mailbox::new(None, from_addr),
     };
 
-    // To address.
-    let to_mailbox: Mailbox = validated
-        .to
-        .parse()
-        .map_err(|e| {
-            error!(error = %e, "invalid to address after validation");
+    // To addresses — one or more (RFC 302).
+    let mut builder = Message::builder().from(from_mailbox);
+    for addr in &validated.to {
+        let to_mailbox: Mailbox = addr.parse().map_err(|e| {
+            error!(error = %e, addr = %addr, "invalid to address after validation");
             AppError::Internal
         })?;
-
-    // Build message.
-    let mut builder = Message::builder()
-        .from(from_mailbox)
-        .to(to_mailbox)
+        builder = builder.to(to_mailbox);
+    }
+    let mut builder = builder
         .subject(validated.subject.clone())
         .header(ContentType::TEXT_PLAIN);
 
@@ -131,6 +128,7 @@ mod tests {
                 allowed_recipient_domains: vec![],
                 max_subject_chars: 200,
                 max_body_bytes: 1_000_000,
+                max_recipients: 10,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),
@@ -138,6 +136,9 @@ mod tests {
                 port: 25,
                 connect_timeout_seconds: 5,
                 submission_timeout_seconds: 30,
+                auth_user: None,
+                auth_password: None,
+                pipe_command: "/usr/sbin/sendmail".into(),
             },
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
@@ -159,7 +160,7 @@ mod tests {
 
     fn minimal_validated() -> ValidatedMailRequest {
         ValidatedMailRequest {
-            to: "user@example.com".into(),
+            to: vec!["user@example.com".into()],
             subject: "Hello".into(),
             body: "Test body.".into(),
             from_name: None,

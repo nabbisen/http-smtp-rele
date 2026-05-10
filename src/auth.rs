@@ -66,7 +66,7 @@ where
 
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
         let app_state = Arc::<AppState>::from_ref(state);
-        let cfg = &app_state.config;
+        let cfg = app_state.config();
         let security = &cfg.security;
 
         // ------------------------------------------------------------------
@@ -215,13 +215,22 @@ fn resolve_peer_ip(parts: &Parts) -> IpAddr {
         .unwrap_or(IpAddr::V4(std::net::Ipv4Addr::LOCALHOST))
 }
 
-/// Resolve the effective client IP, honouring `X-Forwarded-For` only when
+/// Resolve the effective client IP, honouring proxy headers only when
 /// the peer IP is in the trusted proxy CIDR list.
+///
+/// Priority (RFC 303):
+/// 1. `Forwarded: for=<addr>` — RFC 7239 standard header
+/// 2. `X-Forwarded-For: <addr>` — de-facto standard, leftmost entry
+/// 3. Socket peer IP
 fn resolve_client_ip(parts: &Parts, peer_ip: IpAddr, trusted_cidrs: &[String]) -> IpAddr {
     if !ip_in_cidrs(peer_ip, trusted_cidrs) {
         return peer_ip;
     }
-    // Peer is a trusted proxy — use the leftmost value in X-Forwarded-For.
+    // Try RFC 7239 `Forwarded` header first.
+    if let Some(ip) = parse_forwarded_for(&parts.headers) {
+        return ip;
+    }
+    // Fall back to the leftmost entry in `X-Forwarded-For`.
     parts
         .headers
         .get("x-forwarded-for")
@@ -229,6 +238,35 @@ fn resolve_client_ip(parts: &Parts, peer_ip: IpAddr, trusted_cidrs: &[String]) -
         .and_then(|v| v.split(',').next())
         .and_then(|s| s.trim().parse::<IpAddr>().ok())
         .unwrap_or(peer_ip)
+}
+
+/// Parse the `for` directive from an RFC 7239 `Forwarded` header.
+///
+/// Handles:
+/// - `Forwarded: for=1.2.3.4`
+/// - `Forwarded: for="[::1]"`  (IPv6 in brackets)
+/// - `Forwarded: for=1.2.3.4;proto=https;host=example.com` (multiple params)
+/// - `Forwarded: for=a.b.c.d, for=e.f.g.h` (multiple list items — uses first)
+fn parse_forwarded_for(headers: &axum::http::HeaderMap) -> Option<IpAddr> {
+    let value = headers.get("forwarded")?.to_str().ok()?;
+    // Multiple list items separated by commas — use the first (leftmost = original client).
+    let first_item = value.split(',').next()?;
+    // Find the `for=` directive within this item.
+    for part in first_item.split(';') {
+        let part = part.trim();
+        let lower = part.to_ascii_lowercase();
+        if let Some(addr_part) = lower.strip_prefix("for=") {
+            // Strip surrounding quotes and IPv6 brackets.
+            let addr_str = part[part.len() - addr_part.len()..]
+                .trim_matches('"')
+                .trim_matches('[')
+                .trim_matches(']');
+            if let Ok(ip) = addr_str.parse::<IpAddr>() {
+                return Some(ip);
+            }
+        }
+    }
+    None
 }
 
 // ---------------------------------------------------------------------------

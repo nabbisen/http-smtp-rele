@@ -23,6 +23,7 @@ use serde::Deserialize;
 use crate::{
     auth::AuthContext,
     policy,
+    sanitize,
     config::AppConfig,
     error::AppError,
     sanitize::{contains_control_chars, contains_header_injection},
@@ -32,6 +33,28 @@ use crate::{
 // Public request DTO
 // ---------------------------------------------------------------------------
 
+/// One or more recipient addresses.
+///
+/// Accepts a single string (`"alice@example.com"`) or an array
+/// (`["alice@example.com", "bob@example.com"]`) from JSON.
+#[derive(Debug, Clone)]
+pub struct Recipients(pub Vec<String>);
+
+impl<'de> serde::Deserialize<'de> for Recipients {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum OneOrMany {
+            One(String),
+            Many(Vec<String>),
+        }
+        match OneOrMany::deserialize(de)? {
+            OneOrMany::One(s)  => Ok(Recipients(vec![s])),
+            OneOrMany::Many(v) => Ok(Recipients(v)),
+        }
+    }
+}
+
 /// Raw mail request as received from the HTTP client.
 ///
 /// `deny_unknown_fields` ensures that any field not listed here (e.g., `from`,
@@ -39,7 +62,7 @@ use crate::{
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct MailRequest {
-    pub to: String,
+    pub to: Recipients,
     pub subject: String,
     pub body: String,
     pub from_name: Option<String>,
@@ -58,7 +81,7 @@ pub struct MailRequest {
 /// Downstream modules (`mail`, `smtp`) accept only this type.
 #[derive(Debug)]
 pub struct ValidatedMailRequest {
-    pub to: String,
+    pub to: Vec<String>,
     pub subject: String,
     pub body: String,
     pub from_name: Option<String>,
@@ -90,9 +113,25 @@ pub fn validate_mail_request(
 ) -> Result<ValidatedMailRequest, AppError> {
     let mail_cfg = &config.mail;
 
-    // 1. `to`
-    let to = validate_email_address(&req.to, "to")?;
-    check_recipient_domain_or_address(&to, config, auth)?;
+    // 1. `to` — validate each recipient (RFC 302)
+    {
+        let recipients = &req.to.0;
+        if recipients.is_empty() {
+            return Err(AppError::Validation("to: at least one recipient is required".into()));
+        }
+        if recipients.len() > config.mail.max_recipients {
+            return Err(AppError::Validation(format!(
+                "to: too many recipients (max {})",
+                config.mail.max_recipients
+            )));
+        }
+        for addr in recipients {
+            validate_email_address(addr, "to")?;
+            sanitize::reject_header_crlf("to", addr)?;
+            check_recipient_domain_or_address(addr, config, auth)?;
+        }
+    }
+    let to = req.to.0;
 
     // 2. `subject`
     let subject = validate_subject(&req.subject, mail_cfg.max_subject_chars)?;
@@ -328,6 +367,7 @@ mod tests {
                 allowed_recipient_domains: vec![],
                 max_subject_chars: 200,
                 max_body_bytes: 1_000_000,
+                max_recipients: 10,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),
@@ -335,6 +375,9 @@ mod tests {
                 port: 25,
                 connect_timeout_seconds: 5,
                 submission_timeout_seconds: 30,
+                auth_user: None,
+                auth_password: None,
+                pipe_command: "/usr/sbin/sendmail".into(),
             },
             rate_limit: RateLimitConfig {
                 global_per_min: 60,
@@ -356,7 +399,7 @@ mod tests {
 
     fn minimal_request() -> MailRequest {
         MailRequest {
-            to: "user@example.com".into(),
+            to: crate::validation::Recipients(vec!["user@example.com".into()]),
             subject: "Hello".into(),
             body: "Test body".into(),
             from_name: None,
@@ -378,7 +421,7 @@ mod tests {
         let cfg = minimal_config();
         let auth = make_auth("test-key");
         let req = MailRequest {
-            to: "not-an-email".into(),
+            to: crate::validation::Recipients(vec!["not-an-email".into()]),
             ..minimal_request()
         };
         assert!(matches!(
@@ -463,7 +506,7 @@ mod tests {
         cfg.mail.allowed_recipient_domains = vec!["allowed.com".into()];
         let auth = make_auth("test-key");
         let req = MailRequest {
-            to: "user@other.com".into(),
+            to: crate::validation::Recipients(vec!["user@other.com".into()]),
             ..minimal_request()
         };
         assert!(matches!(
@@ -533,8 +576,7 @@ X-Header: injected",
         let cfg = minimal_config();
         let auth = make_auth("test-key");
         let req = MailRequest {
-            to: "user@example.com
-Bcc: attacker@evil.com".to_string(),
+            to: crate::validation::Recipients(vec!["user@example.com\nBcc: attacker@evil.com".to_string()]),
             ..minimal_request()
         };
         assert!(matches!(

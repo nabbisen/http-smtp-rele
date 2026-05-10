@@ -9,13 +9,22 @@ Run `scripts/check-rfcs.sh` to verify structural integrity.
 
 ## Proposed
 
-RFCs open for review. Implementation has not started.
+No RFCs currently open. All v0.3 items are in `done/`.
 
-### v0.2 Planning
+*(Next milestone RFCs will appear here.)*
+
+---
+
+### v0.3 Planning (archived)
 
 | ID  | Title |
 |-----|-------|
-| 200 | [v0.2 Development Plan](./done/200-v02-development-plan.md) |
+| 300 | [v0.3 Development Plan](./done/300-v03-development-plan.md) |
+| 301 | [SMTP AUTH](./done/301-smtp-auth.md) |
+| 302 | [Multi-Recipient to](./done/302-multi-recipient.md) |
+| 303 | [W3C Forwarded Header](./done/303-forwarded-header.md) |
+| 304 | [Sendmail Pipe Mode](./done/304-sendmail-pipe-mode.md) |
+| 305 | [SIGHUP Config Reload](./done/305-sighup-reload.md) |
 
 ### T0 — Governance
 
@@ -119,6 +128,28 @@ RFCs open for review. Implementation has not started.
 | 204 | [Per-Address Recipient Allowlist](./done/204-per-address-allowlist.md) |
 | 205 | [Server Concurrency Limit](./done/205-concurrency-limit.md) |
 | 206 | [IP Bucket LRU Eviction](./done/206-ip-bucket-lru-eviction.md) |
+
+### v0.3 Features
+
+| ID  | Title |
+|-----|-------|
+| 300 | [v0.3 Development Plan](./done/300-v03-development-plan.md) |
+| 301 | [SMTP AUTH](./done/301-smtp-auth.md) |
+| 302 | [Multi-Recipient to](./done/302-multi-recipient.md) |
+| 303 | [W3C Forwarded Header](./done/303-forwarded-header.md) |
+| 304 | [Sendmail Pipe Mode](./done/304-sendmail-pipe-mode.md) |
+| 305 | [SIGHUP Config Reload](./done/305-sighup-reload.md) |
+
+### v0.3 Features
+
+| ID  | Title |
+|-----|-------|
+| 300 | [v0.3 Development Plan](./done/300-v03-development-plan.md) |
+| 301 | [SMTP AUTH](./done/301-smtp-auth.md) |
+| 302 | [Multi-Recipient to](./done/302-multi-recipient.md) |
+| 303 | [W3C Forwarded Header](./done/303-forwarded-header.md) |
+| 304 | [Sendmail Pipe Mode](./done/304-sendmail-pipe-mode.md) |
+| 305 | [SIGHUP Config Reload](./done/305-sighup-reload.md) |
 | 200 | [v0.2 Development Plan](./done/200-v02-development-plan.md) |
 
 ---

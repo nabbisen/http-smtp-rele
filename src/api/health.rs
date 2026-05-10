@@ -58,7 +58,8 @@ pub async fn readyz(State(state): State<Arc<AppState>>) -> (StatusCode, Json<Val
 /// Uses a hardcoded 2-second timeout, independent of `connect_timeout_seconds`.
 /// Does not send any SMTP commands — only checks TCP reachability.
 async fn check_smtp_reachable(state: &AppState) -> bool {
-    let addr = format!("{}:{}", state.config.smtp.host, state.config.smtp.port);
+    let cfg = state.config();
+    let addr = format!("{}:{}", cfg.smtp.host, cfg.smtp.port);
     tokio::time::timeout(
         std::time::Duration::from_secs(2),
         tokio::net::TcpStream::connect(&addr),

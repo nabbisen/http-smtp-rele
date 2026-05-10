@@ -45,3 +45,21 @@ mod tests {
         assert!(contains_control_chars("Hello\x00World"));
     }
 }
+
+/// Rejects any string containing CR (`\r`) or LF (`\n`).
+///
+/// Returns a [`crate::error::AppError::Validation`] error naming the field.
+/// This is the primary API used by the validation pipeline (RFC 051).
+pub fn reject_header_crlf(field: &str, value: &str) -> Result<(), crate::error::AppError> {
+    if contains_header_injection(value) {
+        tracing::warn!(
+            field = field,
+            event = "header_injection_attempt",
+            "CR/LF detected in header-bound field"
+        );
+        return Err(crate::error::AppError::Validation(format!(
+            "{field}: CR or LF characters are not allowed"
+        )));
+    }
+    Ok(())
+}

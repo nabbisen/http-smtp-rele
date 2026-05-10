@@ -157,6 +157,9 @@ pub struct MailConfig {
     pub max_subject_chars: usize,
     #[serde(default = "default_max_body_bytes")]
     pub max_body_bytes: usize,
+    /// Maximum number of recipients per request. Default 10.
+    #[serde(default = "default_max_recipients")]
+    pub max_recipients: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -171,6 +174,13 @@ pub struct SmtpConfig {
     pub connect_timeout_seconds: u64,
     #[serde(default = "default_submission_timeout_seconds")]
     pub submission_timeout_seconds: u64,
+    /// SMTP AUTH username. Must be set together with `auth_password` (RFC 301).
+    pub auth_user: Option<String>,
+    /// SMTP AUTH password. Never logged. Must be set together with `auth_user`.
+    pub auth_password: Option<SecretString>,
+    /// Command for pipe mode. Only used when `mode = "pipe"` (RFC 304).
+    #[serde(default = "default_pipe_command")]
+    pub pipe_command: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -254,6 +264,8 @@ fn default_global_per_min() -> u32 { 60 }
 fn default_per_ip_per_min() -> u32 { 20 }
 #[allow(dead_code)]
 fn default_burst_size() -> u32 { 5 }
+fn default_max_recipients() -> usize { 10 }
+fn default_pipe_command() -> String { "/usr/sbin/sendmail".into() }
 fn default_global_burst() -> u32 { 10 }
 fn default_per_ip_burst() -> u32 { 5 }
 fn default_per_key_burst() -> u32 { 5 }
@@ -288,6 +300,9 @@ pub enum ConfigError {
 
     #[error("invalid CIDR: {0}")]
     InvalidCidr(String),
+
+    #[error("configuration error: {0}")]
+    Validation(String),
 
     #[error("invalid smtp.port: must be 1-65535")]
     InvalidSmtpPort,
@@ -349,6 +364,25 @@ fn validate(config: &AppConfig) -> Result<(), ConfigError> {
     // SMTP port
     if config.smtp.port == 0 {
         return Err(ConfigError::InvalidSmtpPort);
+    }
+
+    // SMTP AUTH: both user and password must be set or both absent
+    match (&config.smtp.auth_user, &config.smtp.auth_password) {
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(ConfigError::Validation(
+                "smtp.auth_user and smtp.auth_password must both be set or both absent".into(),
+            ));
+        }
+        _ => {}
+    }
+
+    // Pipe mode: auth credentials are not applicable
+    if config.smtp.mode == "pipe"
+        && (config.smtp.auth_user.is_some() || config.smtp.auth_password.is_some())
+    {
+        return Err(ConfigError::Validation(
+            r#"smtp.auth_user/auth_password are not applicable when smtp.mode = "pipe""#.into(),
+        ));
     }
 
     // Rate limits

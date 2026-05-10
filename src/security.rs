@@ -2,30 +2,33 @@
 //!
 //! On OpenBSD: applies `pledge(2)` and `unveil(2)` restrictions.
 //! On other platforms: no-op with a log warning.
+//!
+//! # Pledge sets by mode (RFC 091, RFC 304)
+//!
+//! | Mode       | pledge promises            | unveil                          |
+//! |------------|----------------------------|---------------------------------|
+//! | SmtpRelay  | `"stdio inet"`             | `unveil(NULL, NULL)`            |
+//! | SendmailPipe | `"stdio exec proc"`      | `unveil("/usr/sbin/sendmail","x")` then lock |
 
 use std::path::Path;
 
-/// Runtime operation mode, used to select the appropriate pledge promise set.
+/// Runtime operation mode — selects the pledge promise set.
 pub enum RuntimeMode {
+    /// Direct SMTP relay over TCP. Requires `inet` only.
     SmtpRelay,
+    /// Pipe mail through a sendmail-compatible command. Requires `exec proc`.
+    SendmailPipe {
+        /// Absolute path to the sendmail binary (e.g. `/usr/sbin/sendmail`).
+        pipe_command: String,
+    },
 }
 
 /// Apply filesystem restrictions before reading the config file.
-///
-/// On OpenBSD: unveils only the config path with read permission, then
-/// locks unveil. Applies initial pledge (`stdio rpath inet`).
-///
-/// On other platforms: logs a warning and returns `Ok(())`.
 pub fn apply_initial_restrictions(config_path: &Path) -> Result<(), String> {
     platform::apply_initial_restrictions(config_path)
 }
 
 /// Apply runtime restrictions after all initialization is complete.
-///
-/// On OpenBSD: drops file-read permission, tightens pledge to
-/// `stdio inet` (SMTP relay mode).
-///
-/// On other platforms: returns `Ok(())`.
 pub fn apply_runtime_restrictions(mode: RuntimeMode) -> Result<(), String> {
     platform::apply_runtime_restrictions(mode)
 }
@@ -42,22 +45,32 @@ mod platform {
     pub fn apply_initial_restrictions(config_path: &Path) -> Result<(), String> {
         unveil::unveil(config_path, "r")
             .map_err(|e| format!("unveil config path failed: {}", e))?;
-        // Lock unveil — no further unveil calls allowed
         unveil::unveil("", "")
             .map_err(|e| format!("unveil lock failed: {}", e))?;
-        // Initial pledge: read config, set up network
         pledge::pledge("stdio rpath inet", None)
             .map_err(|e| format!("initial pledge failed: {}", e))?;
         Ok(())
     }
 
     pub fn apply_runtime_restrictions(mode: RuntimeMode) -> Result<(), String> {
-        let promises = match mode {
-            RuntimeMode::SmtpRelay => "stdio inet",
-        };
-        // Drop rpath — config already loaded, no more file reads needed
-        pledge::pledge(promises, None)
-            .map_err(|e| format!("runtime pledge failed: {}", e))?;
+        match mode {
+            RuntimeMode::SmtpRelay => {
+                // No file access needed after config load.
+                pledge::pledge("stdio inet", None)
+                    .map_err(|e| format!("runtime pledge failed: {}", e))?;
+            }
+            RuntimeMode::SendmailPipe { ref pipe_command } => {
+                // Unveil only the sendmail binary, then lock.
+                unveil::unveil(pipe_command, "x")
+                    .map_err(|e| format!("unveil pipe command failed: {}", e))?;
+                unveil::unveil("", "")
+                    .map_err(|e| format!("unveil lock failed: {}", e))?;
+                // exec proc: needed to spawn the sendmail child process.
+                // NOTE: stdio inet is NOT included — pipe mode does not open TCP connections.
+                pledge::pledge("stdio exec proc", None)
+                    .map_err(|e| format!("runtime pledge (pipe) failed: {}", e))?;
+            }
+        }
         Ok(())
     }
 }
@@ -86,14 +99,21 @@ mod tests {
 
     #[test]
     fn apply_restrictions_succeeds_on_non_openbsd() {
-        // On non-OpenBSD, this must be a no-op that succeeds.
         let result = apply_initial_restrictions(Path::new("/etc/http-smtp-rele.toml"));
         assert!(result.is_ok());
     }
 
     #[test]
-    fn apply_runtime_restrictions_succeeds_on_non_openbsd() {
+    fn apply_runtime_restrictions_smtp_relay_succeeds_on_non_openbsd() {
         let result = apply_runtime_restrictions(RuntimeMode::SmtpRelay);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn apply_runtime_restrictions_pipe_mode_succeeds_on_non_openbsd() {
+        let result = apply_runtime_restrictions(RuntimeMode::SendmailPipe {
+            pipe_command: "/usr/sbin/sendmail".into(),
+        });
         assert!(result.is_ok());
     }
 }

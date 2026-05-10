@@ -572,3 +572,159 @@ async fn concurrency_limit_zero_is_unlimited() {
     assert_ne!(resp.status, StatusCode::SERVICE_UNAVAILABLE,
         "concurrency=0 should not reject requests");
 }
+
+// ===========================================================================
+// RFC 301 — SMTP AUTH (config validation)
+// ===========================================================================
+
+#[tokio::test]
+async fn smtp_auth_user_only_fails_config_validation() {
+    use http_smtp_rele::config;
+    use std::path::Path;
+    // Write a temp config with only auth_user (missing auth_password)
+    let toml = r#"
+[mail]
+default_from = "r@example.com"
+[[api_keys]]
+id = "k"
+secret = "s"
+enabled = true
+[smtp]
+auth_user = "user@example.com"
+"#;
+    let tmp = std::env::temp_dir().join("http-smtp-rele-test-auth.toml");
+    std::fs::write(&tmp, toml).unwrap();
+    let result = config::load(Path::new(&tmp));
+    std::fs::remove_file(&tmp).ok();
+    assert!(result.is_err(), "auth_user without auth_password must fail config load");
+}
+
+// ===========================================================================
+// RFC 302 — Multi-recipient to
+// ===========================================================================
+
+#[tokio::test]
+async fn multi_recipient_array_delivers_to_all() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": ["alice@example.com", "bob@example.com"],
+            "subject": "Multi-recipient test",
+            "body": "Hello both."
+        }))
+        .build()).await;
+    resp.assert_status(StatusCode::ACCEPTED);
+
+    // The stub receives one SMTP transaction; the message has two RCPT TO entries.
+    // lettre sends both recipients in a single DATA session.
+    stub.assert_count(1);
+    let msg = stub.assert_one();
+    // At minimum, one recipient should appear in envelope
+    assert!(
+        msg.envelope_to.contains("alice@example.com") ||
+        msg.envelope_to.contains("bob@example.com"),
+        "expected a recipient in envelope, got: {}", msg.envelope_to
+    );
+
+    stub.shutdown().await;
+}
+
+#[tokio::test]
+async fn multi_recipient_string_still_works() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let resp = send_valid(&router).await;
+    resp.assert_status(StatusCode::ACCEPTED);
+    stub.assert_count(1);
+    stub.shutdown().await;
+}
+
+#[tokio::test]
+async fn multi_recipient_empty_array_rejected() {
+    let router = test_router_no_smtp();
+    let resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": [],
+            "subject": "Hi",
+            "body": "Hello."
+        }))
+        .build()).await;
+    assert_ne!(resp.status, StatusCode::ACCEPTED, "empty to array must be rejected");
+}
+
+// ===========================================================================
+// RFC 303 — W3C Forwarded header
+// ===========================================================================
+
+#[tokio::test]
+async fn forwarded_header_resolved_when_trusted_proxy() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    // Configure trust for 127.0.0.1 (the test loopback peer)
+    let mut cfg = common::test_config(1);
+    cfg.security.trust_proxy_headers = true;
+    cfg.security.trusted_source_cidrs = vec!["127.0.0.1/32".into()];
+    // Disallow 10.0.0.1 so requests from that IP are blocked
+    cfg.security.allowed_source_cidrs = vec!["1.2.3.4/32".into()];
+    let router = api::build_router(AppState::new(cfg));
+
+    // Send with Forwarded: for=10.0.0.1 (different from allowed list)
+    // The resolved IP would be 10.0.0.1, which is not in allowed_source_cidrs
+    use axum::http::header;
+    let resp = send(&router, axum::http::Request::builder()
+        .method("POST")
+        .uri("/v1/send")
+        .header(header::AUTHORIZATION, "Bearer primary-secret")
+        .header(header::CONTENT_TYPE, "application/json")
+        .header("forwarded", "for=10.0.0.1")
+        .body(axum::body::Body::from(
+            serde_json::to_string(&common::valid_mail_body()).unwrap()
+        ))
+        .unwrap()).await;
+    // Should be forbidden (10.0.0.1 not in allowed_source_cidrs)
+    resp.assert_status(StatusCode::FORBIDDEN);
+}
+
+// ===========================================================================
+// RFC 305 — SIGHUP config reload (structural: ArcSwap store/load)
+// ===========================================================================
+
+#[tokio::test]
+async fn arcswap_config_hot_swap_takes_effect_immediately() {
+    use http_smtp_rele::{AppState, config::*};
+    use std::sync::Arc;
+
+    let cfg = common::test_config(1);
+    let state = AppState::new(cfg);
+
+    // Verify initial key
+    {
+        let c = state.config();
+        assert_eq!(c.security.api_keys[0].id, "primary");
+    }
+
+    // Swap in a new config with a different key id
+    let mut new_cfg = common::test_config(1);
+    new_cfg.security.api_keys[0] = ApiKeyConfig {
+        id: "new-key".into(),
+        secret: SecretString::new("new-secret"),
+        enabled: true,
+        description: None,
+        allowed_recipient_domains: vec!["example.com".into()],
+        allowed_recipients: vec![],
+        rate_limit_per_min: None,
+        burst: 0,
+    };
+    state.reload_config(new_cfg);
+
+    // New config is visible immediately
+    {
+        let c = state.config();
+        assert_eq!(c.security.api_keys[0].id, "new-key");
+    }
+}

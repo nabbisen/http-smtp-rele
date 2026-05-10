@@ -64,7 +64,8 @@ pub async fn send_mail(
         })?;
 
     // 4. Validate and sanitize.
-    let validated = validation::validate_mail_request(payload, &state.config, &auth)
+    let cfg = state.config();
+    let validated = validation::validate_mail_request(payload, &cfg, &auth)
         .map_err(|e| {
             tracing::warn!(
                 event = "validation_failure",
@@ -76,18 +77,26 @@ pub async fn send_mail(
         })?;
 
     // 5. Build mail message.
-    let message = mail::build_message(&validated, &state.config)?;
+    let message = mail::build_message(&validated, &cfg)?;
 
     // 6. Submit to SMTP.
-    let recipient_domain = validated
-        .to
-        .split('@')
-        .nth(1)
+    // For logging: use domain of the first recipient.
+    let recipient_domain = validated.to.first()
+        .and_then(|a| a.split('@').nth(1))
         .unwrap_or("unknown");
 
-    smtp::submit(&state.smtp, message, state.config.smtp.submission_timeout_seconds)
-        .await
-        .map_err(|e| {
+    // Dispatch to pipe or direct SMTP based on mode (RFC 304).
+    let smtp_result = if cfg.smtp.mode == "pipe" {
+        smtp::submit_pipe(
+            message,
+            &cfg.smtp.pipe_command,
+            cfg.smtp.submission_timeout_seconds,
+        ).await
+    } else {
+        smtp::submit(&state.smtp, message, cfg.smtp.submission_timeout_seconds).await
+    };
+
+    smtp_result.map_err(|e| {
             tracing::error!(
                 event = "smtp_failure",
                 key_id = %auth.key_id,

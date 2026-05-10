@@ -80,6 +80,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             allowed_recipient_domains: vec!["example.com".into()],
             max_subject_chars: 255,
             max_body_bytes: 65536,
+            max_recipients: 10,
         },
         smtp: SmtpConfig {
             mode: "smtp".into(),
@@ -87,6 +88,9 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             port: smtp_port,
             connect_timeout_seconds: 2,
             submission_timeout_seconds: 5,
+            auth_user: None,
+            auth_password: None,
+            pipe_command: "/usr/sbin/sendmail".into(),
         },
         rate_limit: RateLimitConfig {
             global_per_min: 600,

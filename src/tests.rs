@@ -92,6 +92,7 @@ fn test_config() -> AppConfig {
             allowed_recipient_domains: vec!["example.com".into()],
             max_subject_chars: 255,
             max_body_bytes: 200,  // intentionally small for SEC-011
+            max_recipients: 10,
         },
         smtp: SmtpConfig {
             mode: "smtp".into(),
@@ -99,6 +100,9 @@ fn test_config() -> AppConfig {
             port: 1,  // no listener — SMTP submit will fail, but that's after validation
             connect_timeout_seconds: 1,
             submission_timeout_seconds: 1,
+            auth_user: None,
+            auth_password: None,
+            pipe_command: "/usr/sbin/sendmail".into(),
         },
         rate_limit: RateLimitConfig {
             global_per_min: 60,

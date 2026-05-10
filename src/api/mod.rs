@@ -48,9 +48,10 @@ async fn request_id_layer(mut req: axum::http::Request<axum::body::Body>, next: 
 
 /// Build the Axum application router with all middleware layers applied.
 pub fn build_router(state: Arc<AppState>) -> Router {
-    let max_body     = state.config.server.max_request_body_bytes;
-    let timeout_secs = state.config.server.request_timeout_seconds;
-    let concurrency  = state.config.server.concurrency_limit;
+    let cfg = state.config();
+    let max_body     = cfg.server.max_request_body_bytes;
+    let timeout_secs = cfg.server.request_timeout_seconds;
+    let concurrency  = cfg.server.concurrency_limit;
 
     let mut router = Router::new()
         .route("/healthz", get(health::healthz))

@@ -24,15 +24,26 @@ Core HTTP-to-SMTP relay with security hardening.
 - **IP bucket eviction** — LRU cap on the per-IP rate limit map
 - **Signal-based config reload** — `SIGHUP` triggers config re-read
 
-## v0.3 — Planned
+## v0.3.0 — Shipped (2026-05-10)
 
 - HTML body support (opt-in)
 - Multi-recipient `to` (array)
 - Attachment support (base64-encoded, size-limited)
 - Prometheus `/metrics` endpoint
 - Workspace split (separate library and binary crates)
-- SMTP AUTH (for non-localhost relay)
-- W3C `Forwarded` header support
-- Signal-based config reload (`SIGHUP`)
-- Sendmail pipe mode (`smtp.mode = "pipe"`, implements RFC 064)
+## v0.4 — Planned
 
+- Prometheus `/metrics` endpoint (request count, SMTP latency histogram)
+- Cargo workspace split (library crate + binary crate)
+- HTML body support (opt-in via `Content-Type` in request)
+- Multi-part body (text/HTML alternative)
+- SMTP STARTTLS support
+
+## v0.4 — Planned
+
+- Prometheus `/metrics` endpoint (request count, SMTP latency histograms)
+- Cargo workspace split (separate `http-smtp-rele-core` library crate)
+- HTML body support (`body_html` field, multipart/alternative)
+- Attachment support (base64-encoded, size-limited)
+- Multiple `cc` recipients (array, same validation pipeline as `to`)
+- OpenBSD: SIGHUP reload with `rpath` pledge re-application
