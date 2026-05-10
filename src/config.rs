@@ -117,7 +117,9 @@ pub struct AppConfig {
     pub security:   SecurityConfig,
     pub mail:       MailConfig,
     pub smtp:       SmtpConfig,
+    #[serde(default)]
     pub rate_limit: RateLimitConfig,
+    #[serde(default)]
     pub logging:    LoggingConfig,
     #[serde(default)]
     pub status:     StatusConfig,
@@ -148,6 +150,10 @@ pub struct ServerConfig {
     /// Maximum concurrent in-flight requests. 0 = unlimited.
     #[serde(default)]
     pub concurrency_limit: usize,
+    /// PEM certificate for HTTPS (RFC 712). Both cert and key must be set.
+    pub tls_cert: Option<std::path::PathBuf>,
+    /// PEM private key for HTTPS (RFC 712). Both cert and key must be set.
+    pub tls_key:  Option<std::path::PathBuf>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -242,6 +248,10 @@ pub struct SmtpConfig {
     /// Command for pipe mode. Only used when `mode = "pipe"` (RFC 304).
     #[serde(default = "default_pipe_command")]
     pub pipe_command: String,
+    /// Max concurrent SMTP submissions per bulk request (RFC 711).
+    /// 0 = unlimited. Default: 5.
+    #[serde(default = "default_bulk_concurrency")]
+    pub bulk_concurrency: usize,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -321,6 +331,7 @@ fn default_smtp_host() -> String { "127.0.0.1".into() }
 fn default_smtp_port() -> u16 { 25 }
 fn default_connect_timeout_seconds() -> u64 { 5 }
 fn default_submission_timeout_seconds() -> u64 { 30 }
+fn default_bulk_concurrency() -> usize { 5 }
 fn default_global_per_min() -> u32 { 60 }
 fn default_per_ip_per_min() -> u32 { 20 }
 #[allow(dead_code)]
@@ -379,6 +390,35 @@ pub enum ConfigError {
 
     #[error("invalid logging.format: must be 'text' or 'json'")]
     InvalidLogFormat,
+}
+
+// ---------------------------------------------------------------------------
+// Default impls (needed for #[serde(default)] on AppConfig fields)
+// ---------------------------------------------------------------------------
+
+impl Default for RateLimitConfig {
+    fn default() -> Self {
+        Self {
+            global_per_min:    default_global_per_min(),
+            per_ip_per_min:    default_per_ip_per_min(),
+            per_key_per_min:   default_per_key_per_min(),
+            global_burst:      default_global_burst(),
+            per_ip_burst:      default_per_ip_burst(),
+            per_key_burst:     default_per_key_burst(),
+            ip_table_size:     default_ip_table_size(),
+            burst_size:        0,
+        }
+    }
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            format:         default_log_format(),
+            level:          default_log_level(),
+            mask_recipient: false,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +492,22 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
             ));
         }
         _ => {}
+    }
+
+    // TLS: cert and key must both be set or both absent (RFC 712)
+    match (&config.server.tls_cert, &config.server.tls_key) {
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(ConfigError::Validation(
+                "server.tls_cert and server.tls_key must both be set or both be absent".into()
+            ));
+        }
+        (Some(_), Some(_)) => {
+            #[cfg(not(feature = "tls"))]
+            return Err(ConfigError::Validation(
+                "server.tls_cert/tls_key is configured but TLS is not available in this build.                  Rebuild with: cargo build --features tls".into()
+            ));
+        }
+        (None, None) => {}
     }
 
     // Status store: db_path required for sqlite; feature check

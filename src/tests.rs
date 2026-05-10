@@ -57,6 +57,8 @@ fn test_config() -> AppConfig {
             request_timeout_seconds: 5,
             shutdown_timeout_seconds: 5,
             concurrency_limit: 0,
+            tls_cert: None,
+            tls_key: None,
         },
         security: SecurityConfig {
             require_auth: true,
@@ -109,6 +111,7 @@ fn test_config() -> AppConfig {
             auth_password: None,
             pipe_command: "/usr/sbin/sendmail".into(),
             tls: "none".into(),
+            bulk_concurrency: 5,
         },
         rate_limit: RateLimitConfig {
             global_per_min: 60,

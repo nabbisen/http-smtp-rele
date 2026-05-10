@@ -1856,3 +1856,167 @@ async fn bulk_all_smtp_failed_returns_202_with_rejected() {
         assert_eq!(r["code"], "smtp_unavailable");
     }
 }
+
+// ===========================================================================
+// RFC 711 — Bulk SMTP Parallelism
+// ===========================================================================
+
+/// RFC-711-01: bulk concurrency setting respected — results stay in index order.
+#[tokio::test]
+async fn bulk_parallelism_results_in_index_order() {
+    use http_smtp_rele::{api, config::*, AppState};
+    let stub = SmtpStub::start(0).await;
+    let mut cfg = common::test_config(stub.port());
+    cfg.smtp.bulk_concurrency = 2; // explicit concurrency cap
+    let router = api::build_router(AppState::new(cfg));
+
+    let msgs: Vec<serde_json::Value> = (0..4)
+        .map(|i| serde_json::json!({
+            "to": format!("user{}@example.com", i),
+            "subject": format!("Msg {}", i),
+            "body": "Hello."
+        }))
+        .collect();
+
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(serde_json::json!({"messages": msgs}))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    let results = resp.body["results"].as_array().unwrap();
+    assert_eq!(results.len(), 4);
+    // Indices must always be 0, 1, 2, 3 in order
+    for (i, r) in results.iter().enumerate() {
+        assert_eq!(r["index"], i, "result at position {i} must have index {i}");
+    }
+
+    stub.shutdown().await;
+}
+
+/// RFC-711-02: bulk_concurrency = 0 means unlimited (no semaphore deadlock).
+#[tokio::test]
+async fn bulk_concurrency_zero_means_unlimited() {
+    use http_smtp_rele::{api, config::*, AppState};
+    let stub = SmtpStub::start(0).await;
+    let mut cfg = common::test_config(stub.port());
+    cfg.smtp.bulk_concurrency = 0; // unlimited
+    let router = api::build_router(AppState::new(cfg));
+
+    let msgs: Vec<serde_json::Value> = (0..3)
+        .map(|i| serde_json::json!({
+            "to": format!("u{}@example.com", i),
+            "subject": "S", "body": "B"
+        }))
+        .collect();
+    let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
+        .bearer("primary-secret")
+        .json(serde_json::json!({"messages": msgs}))
+        .build()).await;
+
+    resp.assert_status(StatusCode::ACCEPTED);
+    assert_eq!(resp.body["accepted"], 3);
+    stub.shutdown().await;
+}
+
+// ===========================================================================
+// RFC 712 — HTTP Server TLS Config Validation
+// ===========================================================================
+
+/// RFC-712-01: tls_cert without tls_key rejected at config load.
+#[test]
+fn tls_cert_without_key_rejected() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+tls_cert = "/tmp/cert.pem"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "cert-only must be rejected");
+    let msg = result.unwrap_err().to_string();
+    assert!(msg.contains("tls_cert") || msg.contains("tls_key"),
+        "error must mention tls fields: {msg}");
+}
+
+/// RFC-712-02: tls_key without tls_cert rejected.
+#[test]
+fn tls_key_without_cert_rejected() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+tls_key = "/tmp/key.pem"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "key-only must be rejected");
+}
+
+/// RFC-712-03: neither tls_cert nor tls_key is valid (plain HTTP).
+#[test]
+fn no_tls_config_is_valid_plain_http() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_ok(), "no TLS config must be valid: {:?}", result);
+}
+
+/// RFC-712-04: non-TLS build rejects both-set TLS config.
+#[cfg(not(feature = "tls"))]
+#[test]
+fn non_tls_build_rejects_tls_config() {
+    let toml = r#"
+[server]
+bind_address = "127.0.0.1:8080"
+tls_cert = "/tmp/cert.pem"
+tls_key  = "/tmp/key.pem"
+[security]
+require_auth = false
+[[api_keys]]
+id = "k"
+secret = "s"
+[mail]
+default_from = "a@example.com"
+allowed_recipient_domains = ["example.com"]
+[smtp]
+host = "127.0.0.1"
+port = 25
+"#;
+    let result = http_smtp_rele::config::load_from_str(toml);
+    assert!(result.is_err(), "TLS config in non-TLS build must be rejected");
+    assert!(result.unwrap_err().to_string().contains("not available"),
+        "error must mention build flag");
+}

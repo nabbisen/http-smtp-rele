@@ -141,6 +141,36 @@ async fn main() {
 
     // 11. Serve
     let router = api::build_router(state);
+
+    #[cfg(feature = "tls")]
+    if let (Some(cert), Some(key)) = (&config.server.tls_cert, &config.server.tls_key) {
+        use axum_server::tls_rustls::RustlsConfig;
+        let tls_config = RustlsConfig::from_pem_file(cert, key)
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "failed to load TLS certificate");
+                std::process::exit(1);
+            });
+        let addr: std::net::SocketAddr = bind_addr.parse().unwrap_or_else(|e| {
+            tracing::error!(error = %e, "invalid bind address");
+            std::process::exit(1);
+        });
+        tracing::info!(bind_address = %addr, tls = true, "serving HTTPS");
+        axum_server::bind_rustls(addr, tls_config)
+            .serve(router.into_make_service())
+            .await
+            .unwrap_or_else(|e| {
+                tracing::error!(error = %e, "server error");
+                std::process::exit(1);
+            });
+    } else {
+        axum::serve(listener, router).await.unwrap_or_else(|e| {
+            tracing::error!(error = %e, "server error");
+            std::process::exit(1);
+        });
+    }
+
+    #[cfg(not(feature = "tls"))]
     axum::serve(listener, router).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "server error");
         std::process::exit(1);

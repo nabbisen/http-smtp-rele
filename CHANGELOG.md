@@ -35,6 +35,50 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.10.0] — 2026-05-10
+
+### Theme: Performance and Transport Security
+
+### Added
+
+**Bounded-parallel SMTP submission for send-bulk (RFC 711)**
+- Two-phase processing: sequential rate-limit/validate/build → parallel SMTP submit
+- `[smtp].bulk_concurrency = 5` (default, 0 = unlimited)
+- `tokio::task::JoinSet` + `tokio::sync::Semaphore` for bounded concurrency
+- Response `results` always sorted by request index regardless of completion order
+- All existing bulk tests pass unchanged; 2 new parallelism tests added
+
+**HTTP server TLS / HTTPS (RFC 712, `--features tls`)**
+- `[server].tls_cert` + `[server].tls_key` — PEM certificate and key paths
+- `axum-server = "0.7"` with `tls-rustls` (pure-Rust TLS, no OpenSSL)
+- Feature flag: `cargo build --release --features tls`
+- OpenBSD: `unveil(tls_cert, "r")` + `unveil(tls_key, "r")` before runtime pledge
+- Certs loaded into memory before pledge; no additional pledge promises required
+- Config validation: both fields required together or neither
+- Non-TLS build with `tls_cert` configured → startup error with build instruction
+- 4 TLS config validation tests added
+
+**`[rate_limit]` and `[logging]` sections now optional in config**
+- Added `#[serde(default)]` + `Default` impls for `RateLimitConfig` and `LoggingConfig`
+- Allows minimal TOMLs without explicitly spelling out default-only sections
+- Backward-compatible (existing full configs continue to work)
+
+### Changed
+
+- `[smtp].bulk_concurrency` field added (default: 5)
+- `[server].tls_cert`, `[server].tls_key` fields added (default: None)
+- `axum-server = "0.7"` optional dependency (feature: `tls`)
+- `[features] tls = ["dep:axum-server"]` added to Cargo.toml
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 85 | 166 |
+| `--features tls` | 81 | 84 | 165 |
+
+---
+
 ## [0.9.0] — 2026-05-10
 
 ### Theme: Bulk Submission
@@ -147,6 +191,50 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.10.0] — 2026-05-10
+
+### Theme: Performance and Transport Security
+
+### Added
+
+**Bounded-parallel SMTP submission for send-bulk (RFC 711)**
+- Two-phase processing: sequential rate-limit/validate/build → parallel SMTP submit
+- `[smtp].bulk_concurrency = 5` (default, 0 = unlimited)
+- `tokio::task::JoinSet` + `tokio::sync::Semaphore` for bounded concurrency
+- Response `results` always sorted by request index regardless of completion order
+- All existing bulk tests pass unchanged; 2 new parallelism tests added
+
+**HTTP server TLS / HTTPS (RFC 712, `--features tls`)**
+- `[server].tls_cert` + `[server].tls_key` — PEM certificate and key paths
+- `axum-server = "0.7"` with `tls-rustls` (pure-Rust TLS, no OpenSSL)
+- Feature flag: `cargo build --release --features tls`
+- OpenBSD: `unveil(tls_cert, "r")` + `unveil(tls_key, "r")` before runtime pledge
+- Certs loaded into memory before pledge; no additional pledge promises required
+- Config validation: both fields required together or neither
+- Non-TLS build with `tls_cert` configured → startup error with build instruction
+- 4 TLS config validation tests added
+
+**`[rate_limit]` and `[logging]` sections now optional in config**
+- Added `#[serde(default)]` + `Default` impls for `RateLimitConfig` and `LoggingConfig`
+- Allows minimal TOMLs without explicitly spelling out default-only sections
+- Backward-compatible (existing full configs continue to work)
+
+### Changed
+
+- `[smtp].bulk_concurrency` field added (default: 5)
+- `[server].tls_cert`, `[server].tls_key` fields added (default: None)
+- `axum-server = "0.7"` optional dependency (feature: `tls`)
+- `[features] tls = ["dep:axum-server"]` added to Cargo.toml
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 85 | 166 |
+| `--features tls` | 81 | 84 | 165 |
 
 ---
 
@@ -478,6 +566,50 @@ Restart required: `enabled`, `store`
 
 ---
 
+## [0.10.0] — 2026-05-10
+
+### Theme: Performance and Transport Security
+
+### Added
+
+**Bounded-parallel SMTP submission for send-bulk (RFC 711)**
+- Two-phase processing: sequential rate-limit/validate/build → parallel SMTP submit
+- `[smtp].bulk_concurrency = 5` (default, 0 = unlimited)
+- `tokio::task::JoinSet` + `tokio::sync::Semaphore` for bounded concurrency
+- Response `results` always sorted by request index regardless of completion order
+- All existing bulk tests pass unchanged; 2 new parallelism tests added
+
+**HTTP server TLS / HTTPS (RFC 712, `--features tls`)**
+- `[server].tls_cert` + `[server].tls_key` — PEM certificate and key paths
+- `axum-server = "0.7"` with `tls-rustls` (pure-Rust TLS, no OpenSSL)
+- Feature flag: `cargo build --release --features tls`
+- OpenBSD: `unveil(tls_cert, "r")` + `unveil(tls_key, "r")` before runtime pledge
+- Certs loaded into memory before pledge; no additional pledge promises required
+- Config validation: both fields required together or neither
+- Non-TLS build with `tls_cert` configured → startup error with build instruction
+- 4 TLS config validation tests added
+
+**`[rate_limit]` and `[logging]` sections now optional in config**
+- Added `#[serde(default)]` + `Default` impls for `RateLimitConfig` and `LoggingConfig`
+- Allows minimal TOMLs without explicitly spelling out default-only sections
+- Backward-compatible (existing full configs continue to work)
+
+### Changed
+
+- `[smtp].bulk_concurrency` field added (default: 5)
+- `[server].tls_cert`, `[server].tls_key` fields added (default: None)
+- `axum-server = "0.7"` optional dependency (feature: `tls`)
+- `[features] tls = ["dep:axum-server"]` added to Cargo.toml
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 85 | 166 |
+| `--features tls` | 81 | 84 | 165 |
+
+---
+
 ## [0.9.0] — 2026-05-10
 
 ### Theme: Bulk Submission
@@ -590,6 +722,50 @@ fatal: status.store = "sqlite" is not available in this build.
 - `docs/configuration.md` — `[status]` section with SQLite setup guide
 - `docs/openbsd.md` — SQLite pledge/unveil additions
 - `examples/http-smtp-rele.toml` — `[status]` section with commented `db_path`
+
+---
+
+## [0.10.0] — 2026-05-10
+
+### Theme: Performance and Transport Security
+
+### Added
+
+**Bounded-parallel SMTP submission for send-bulk (RFC 711)**
+- Two-phase processing: sequential rate-limit/validate/build → parallel SMTP submit
+- `[smtp].bulk_concurrency = 5` (default, 0 = unlimited)
+- `tokio::task::JoinSet` + `tokio::sync::Semaphore` for bounded concurrency
+- Response `results` always sorted by request index regardless of completion order
+- All existing bulk tests pass unchanged; 2 new parallelism tests added
+
+**HTTP server TLS / HTTPS (RFC 712, `--features tls`)**
+- `[server].tls_cert` + `[server].tls_key` — PEM certificate and key paths
+- `axum-server = "0.7"` with `tls-rustls` (pure-Rust TLS, no OpenSSL)
+- Feature flag: `cargo build --release --features tls`
+- OpenBSD: `unveil(tls_cert, "r")` + `unveil(tls_key, "r")` before runtime pledge
+- Certs loaded into memory before pledge; no additional pledge promises required
+- Config validation: both fields required together or neither
+- Non-TLS build with `tls_cert` configured → startup error with build instruction
+- 4 TLS config validation tests added
+
+**`[rate_limit]` and `[logging]` sections now optional in config**
+- Added `#[serde(default)]` + `Default` impls for `RateLimitConfig` and `LoggingConfig`
+- Allows minimal TOMLs without explicitly spelling out default-only sections
+- Backward-compatible (existing full configs continue to work)
+
+### Changed
+
+- `[smtp].bulk_concurrency` field added (default: 5)
+- `[server].tls_cert`, `[server].tls_key` fields added (default: None)
+- `axum-server = "0.7"` optional dependency (feature: `tls`)
+- `[features] tls = ["dep:axum-server"]` added to Cargo.toml
+
+### Test coverage
+
+| Build | unit | integration | total |
+|-------|------|-------------|-------|
+| default | 81 | 85 | 166 |
+| `--features tls` | 81 | 84 | 165 |
 
 ---
 

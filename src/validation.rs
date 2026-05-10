@@ -463,6 +463,8 @@ mod tests {
                 request_timeout_seconds: 30,
                 shutdown_timeout_seconds: 30,
                 concurrency_limit: 0,
+                tls_cert: None,
+                tls_key: None,
             },
             security: SecurityConfig {
                 require_auth: true,
@@ -502,6 +504,7 @@ mod tests {
                 auth_password: None,
                 pipe_command: "/usr/sbin/sendmail".into(),
                 tls: "none".into(),
+                bulk_concurrency: 5,
             },
             rate_limit: RateLimitConfig {
                 global_per_min: 60,

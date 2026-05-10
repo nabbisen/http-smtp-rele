@@ -99,6 +99,8 @@ mod platform {
     }
 
     pub fn apply_sqlite_restrictions(_db_path: &std::path::Path) -> Result<(), String> { Ok(()) }
+    #[allow(dead_code)]
+    pub fn apply_tls_file_restrictions(_cert: &std::path::Path, _key: &std::path::Path) -> Result<(), String> { Ok(()) }
     pub fn apply_runtime_restrictions(_mode: RuntimeMode, _has_sqlite: bool) -> Result<(), String> { Ok(()) }
 }
 

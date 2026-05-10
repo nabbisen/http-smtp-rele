@@ -86,3 +86,8 @@ Core HTTP-to-SMTP relay with security hardening.
 - Redis/Valkey shared status store
 - Parallel SMTP submission for send-bulk (bounded concurrency)
 - OpenBSD SIGHUP `rpath` re-application window
+
+## v0.10.0 — Shipped (2026-05-10)
+
+- Bulk SMTP parallelism (RFC 711)
+- HTTP server TLS, optional --features tls (RFC 712)

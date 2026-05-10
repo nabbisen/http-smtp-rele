@@ -81,6 +81,14 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 702 | [Bulk Submission Rate Limiting](./done/702-bulk-send-rate-limiting.md) |
 | 703 | [Bulk Send Integration Tests](./done/703-bulk-send-tests.md) |
 
+### v0.10 — Performance and Transport Security
+
+| ID  | Title |
+|-----|-------|
+| 710 | [v0.10 Development Plan](./done/710-v010-development-plan.md) |
+| 711 | [Bulk SMTP Parallelism](./done/711-bulk-smtp-parallelism.md) |
+| 712 | [HTTP Server TLS (HTTPS)](./done/712-http-server-tls.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
