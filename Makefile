@@ -18,16 +18,16 @@ CARGO   := RUSTC=$(RUSTC) RUSTDOC=$(RUSTDOC) /usr/bin/cargo-1.91
 .PHONY: build release test check check-rfcs clean gate
 
 build:
-	$(CARGO) build
+	$(CARGO) build --workspace
 
 release:
 	$(CARGO) build --release
 
 test:
-	$(CARGO) test
+	$(CARGO) test --workspace
 
 check:
-	$(CARGO) check
+	$(CARGO) check --workspace
 
 check-rfcs:
 	@sh scripts/check-rfcs.sh

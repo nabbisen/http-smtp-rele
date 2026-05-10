@@ -1,66 +1,67 @@
 [workspace]
-members = [".", "crates/cli"]
+members  = ["crates/http-smtp-rele", "crates/cli"]
 resolver = "2"
 
-[package]
-name = "http-smtp-rele"
-version = "0.15.0"
-edition = "2024"
-authors = ["nabbisen"]
-license = "Apache-2.0"
-description = "Minimal, secure HTTP-to-SMTP submission relay"
+# ---------------------------------------------------------------------------
+# Shared package metadata — referenced with { workspace = true } in members.
+# ---------------------------------------------------------------------------
+[workspace.package]
+version    = "0.15.1"
+edition    = "2024"
+authors    = ["nabbisen"]
+license    = "Apache-2.0"
 repository = "https://github.com/nabbisen/http-smtp-rele"
 
-
-[lib]
-name = "http_smtp_rele"
-path = "src/lib.rs"
-
-[dependencies]
+# ---------------------------------------------------------------------------
+# Shared dependencies — referenced with { workspace = true } in members.
+# Features listed here are the defaults; members may add extras inline.
+# ---------------------------------------------------------------------------
+[workspace.dependencies]
+# HTTP
 axum            = "0.8"
-tokio           = { version = "1", features = ["full"] }
+axum-server     = { version = "0.7", features = ["tls-rustls"] }
 tower           = { version = "0.5", features = ["limit"] }
 tower-http      = { version = "0.6", features = ["limit", "timeout", "trace"] }
+# Async runtime
+tokio           = { version = "1", features = ["full"] }
+# Serialisation
 serde           = { version = "1", features = ["derive"] }
 serde_json      = "1"
 toml            = "0.8"
-lettre          = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls"] }
-tracing         = "0.1"
+# Observability
+tracing            = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt", "json"] }
-thiserror       = "2"
-clap            = { version = "4", features = ["derive"] }
-ipnet           = "2"
-subtle          = "2"
-anyhow          = "1"
-arc-swap        = "1"
-rusqlite        = { version = "0.32", features = ["bundled"], optional = true }
-parking_lot      = "0.12"
-axum-server     = { version = "0.7", features = ["tls-rustls"], optional = true }
-redis           = { version = "0.25", optional = true }
-ulid            = { version = "1", features = ["serde"] }
-chrono          = { version = "0.4", features = ["serde"] }
-prometheus      = { version = "0.13", default-features = false }
-base64          = "0.22"
+prometheus         = { version = "0.13", default-features = false }
+# Mail
+lettre = { version = "0.11", default-features = false, features = ["smtp-transport", "builder", "tokio1", "tokio1-rustls-tls"] }
+# Error handling
+thiserror = "2"
+anyhow    = "1"
+# Networking / security
+ipnet  = "2"
+subtle = "2"
+# Utilities
+arc-swap    = "1"
+parking_lot = "0.12"
+ulid        = { version = "1", features = ["serde"] }
+chrono      = { version = "0.4", features = ["serde"] }
+base64      = "0.22"
+clap        = { version = "4", features = ["derive"] }
+# Optional / platform
+rusqlite = { version = "0.32", features = ["bundled"] }
+redis    = "0.25"
+libc     = "0.2"
+# Test helpers
+http-body-util = "0.1"
+tempfile       = "3"
+# Internal
+http-smtp-rele = { path = "crates/http-smtp-rele", version = "0.15.1" }
 
-[target.'cfg(target_os = "openbsd")'.dependencies]
-libc            = "0.2"
-
-[dev-dependencies]
-base64 = "0.22"
-tokio           = { version = "1", features = ["full"] }
-tower           = { version = "0.5", features = ["limit"] }
-http-body-util  = "0.1"
-tempfile        = "3"
-
+# ---------------------------------------------------------------------------
+# Release profile — must be in the workspace root (not in member crates).
+# ---------------------------------------------------------------------------
 [profile.release]
 opt-level     = "z"
 lto           = true
 codegen-units = 1
 panic         = "abort"
-
-
-[features]
-default = []
-sqlite  = ["dep:rusqlite"]
-tls     = ["dep:axum-server"]
-redis   = ["dep:redis"]

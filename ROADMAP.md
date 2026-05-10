@@ -119,3 +119,7 @@ Deploy automation: OpenBSD rc.d, Linux systemd, deployment guide.
 
 Hardening release: architect review remediation (42 RFCs, functional + non-functional).
 Production core re-established; extended features default-off.
+
+## v0.15.1 — Shipped (2026-05-11)
+
+Workspace restructure, test file split, .gitignore fix.

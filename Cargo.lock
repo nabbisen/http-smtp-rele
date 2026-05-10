@@ -629,7 +629,7 @@ dependencies = [
 
 [[package]]
 name = "http-smtp-rele"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -637,7 +637,6 @@ dependencies = [
  "axum-server",
  "base64",
  "chrono",
- "clap",
  "http-body-util",
  "ipnet",
  "lettre",
@@ -662,7 +661,7 @@ dependencies = [
 
 [[package]]
 name = "http-smtp-rele-cli"
-version = "0.15.0"
+version = "0.15.1"
 dependencies = [
  "anyhow",
  "axum",

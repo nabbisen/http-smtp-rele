@@ -1,0 +1,64 @@
+[package]
+name        = "http-smtp-rele"
+version.workspace    = true
+edition.workspace    = true
+authors.workspace    = true
+license.workspace    = true
+repository.workspace = true
+description = "Minimal, secure HTTP-to-SMTP submission relay"
+
+[lib]
+name = "http_smtp_rele"
+path = "src/lib.rs"
+
+# ---------------------------------------------------------------------------
+# Runtime dependencies
+# ---------------------------------------------------------------------------
+[dependencies]
+axum            = { workspace = true }
+tower           = { workspace = true }
+tower-http      = { workspace = true }
+tokio           = { workspace = true }
+serde           = { workspace = true }
+serde_json      = { workspace = true }
+toml            = { workspace = true }
+lettre          = { workspace = true }
+tracing         = { workspace = true }
+tracing-subscriber = { workspace = true }
+thiserror       = { workspace = true }
+ipnet           = { workspace = true }
+subtle          = { workspace = true }
+anyhow          = { workspace = true }
+arc-swap        = { workspace = true }
+parking_lot     = { workspace = true }
+ulid            = { workspace = true }
+chrono          = { workspace = true }
+prometheus      = { workspace = true }
+base64          = { workspace = true }
+
+# Optional features
+rusqlite   = { workspace = true, optional = true }
+axum-server = { workspace = true, optional = true }
+redis      = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "openbsd")'.dependencies]
+libc = { workspace = true }
+
+# ---------------------------------------------------------------------------
+# Dev dependencies (tests only)
+# ---------------------------------------------------------------------------
+[dev-dependencies]
+base64         = { workspace = true }
+tokio          = { workspace = true }
+tower          = { workspace = true }
+http-body-util = { workspace = true }
+tempfile       = { workspace = true }
+
+# ---------------------------------------------------------------------------
+# Feature flags
+# ---------------------------------------------------------------------------
+[features]
+default = []
+sqlite  = ["dep:rusqlite"]
+tls     = ["dep:axum-server"]
+redis   = ["dep:redis"]
