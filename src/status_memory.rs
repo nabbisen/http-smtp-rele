@@ -9,9 +9,10 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc,
     },
 };
+use parking_lot::RwLock;
 
 use arc_swap::ArcSwap;
 use chrono::Utc;
@@ -20,7 +21,7 @@ use crate::{
     config::StatusConfig,
     metrics::Metrics,
     request_id::RequestId,
-    status::{StatusStore, StatusUpdate, SubmissionStatusRecord},
+    status::{Domain, StatusStore, StatusStoreError, StatusUpdate, SubmissionStatusRecord},
 };
 
 // ---------------------------------------------------------------------------
@@ -57,33 +58,51 @@ impl InMemoryStatusStore {
 }
 
 impl StatusStore for InMemoryStatusStore {
-    fn put(&self, record: SubmissionStatusRecord) {
+    fn put_received(&self, record: SubmissionStatusRecord) -> Result<(), StatusStoreError> {
         let key = record.request_id.as_str().to_string();
-        let mut map = self.records.write().unwrap();
+        let mut map = self.records.write();
         let cfg = self.config.load();
 
-        // Enforce max_records: evict oldest by created_at if necessary.
+        // Insert-only: ignore if request_id already exists (RFC 813).
+        if map.contains_key(&key) {
+            return Ok(());
+        }
+
+        // Enforce max_records: evict oldest if needed.
         if map.len() >= cfg.max_records {
-            // Find oldest non-expired entry first; if all valid, evict oldest overall.
-            let to_remove = map
-                .iter()
-                .min_by_key(|(_, r)| r.created_at)
-                .map(|(k, _)| k.clone());
-            if let Some(k) = to_remove {
-                map.remove(&k);
-            }
+            let to_remove = map.iter().min_by_key(|(_, r)| r.created_at).map(|(k, _)| k.clone());
+            if let Some(k) = to_remove { map.remove(&k); }
         }
 
         map.insert(key, record);
         self.metrics.status_record_created();
+        Ok(())
     }
 
-    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) {
-        let mut map = self.records.write().unwrap();
+    fn set_recipient_metadata(
+        &self,
+        request_id: &RequestId,
+        key_id: &str,
+        recipient_domains: Vec<Domain>,
+        recipient_count: u32,
+    ) -> Result<(), StatusStoreError> {
+        let mut map = self.records.write();
+        if let Some(record) = map.get_mut(request_id.as_str()) {
+            if record.key_id == key_id && !record.is_expired() {
+                record.recipient_domains = recipient_domains;
+                record.recipient_count   = recipient_count;
+                record.updated_at        = Utc::now();
+            }
+        }
+        Ok(())
+    }
+
+    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) -> Result<(), StatusStoreError> {
+        let mut map = self.records.write();
         if let Some(record) = map.get_mut(request_id.as_str()) {
             // Skip if record belongs to different key, is expired, or already terminal.
             if record.key_id != key_id || record.is_expired() || record.status.is_terminal() {
-                return;
+                return Ok(());
             }
             let now = Utc::now();
             record.status = update.status;
@@ -102,27 +121,28 @@ impl StatusStore for InMemoryStatusStore {
                 .unwrap_or_else(|| "none".into());
             self.metrics.status_transitioned(&status_str, &code_str);
         }
+        Ok(())
     }
 
-    fn get(&self, request_id: &RequestId, key_id: &str) -> Option<SubmissionStatusRecord> {
+    fn get(&self, request_id: &RequestId, key_id: &str) -> Result<Option<SubmissionStatusRecord>, StatusStoreError> {
         // Try read lock first.
         {
-            let map = self.records.read().unwrap();
-            let record = map.get(request_id.as_str())?;
+            let map = self.records.read();
+            let Some(record) = map.get(request_id.as_str()) else { return Ok(None); };
 
             // Key mismatch → return None (same response as not-found, prevents enumeration).
             if record.key_id != key_id {
-                return None;
+                return Ok(None);
             }
 
             // Still valid.
             if !record.is_expired() {
-                return Some(record.clone());
+                return Ok(Some(record.clone()));
             }
         }
 
         // Lazy expiry: upgrade to write lock and delete.
-        let mut map = self.records.write().unwrap();
+        let mut map = self.records.write();
         if let Some(record) = map.get(request_id.as_str()) {
             if record.is_expired() {
                 map.remove(request_id.as_str());
@@ -130,12 +150,12 @@ impl StatusStore for InMemoryStatusStore {
                 self.metrics.status_record_expired_one();
             }
         }
-        None
+        Ok(None)
     }
 
     fn expire_old_records(&self) {
         let now = Utc::now();
-        let mut map = self.records.write().unwrap();
+        let mut map = self.records.write();
         let cfg = self.config.load();
 
         // Step 1: remove expired records.
@@ -162,7 +182,7 @@ impl StatusStore for InMemoryStatusStore {
     }
 
     fn record_count(&self) -> usize {
-        let count = self.records.read().unwrap().len();
+        let count = self.records.read().len();
         self.metrics.status_set_current(count);
         count
     }
@@ -182,9 +202,10 @@ impl StatusStore for InMemoryStatusStore {
 pub struct NoopStatusStore;
 
 impl StatusStore for NoopStatusStore {
-    fn put(&self, _record: SubmissionStatusRecord) {}
-    fn update_status(&self, _: &RequestId, _: &str, _: StatusUpdate) {}
-    fn get(&self, _: &RequestId, _: &str) -> Option<SubmissionStatusRecord> { None }
+    fn put_received(&self, _: SubmissionStatusRecord) -> Result<(), StatusStoreError> { Ok(()) }
+    fn set_recipient_metadata(&self, _: &RequestId, _: &str, _: Vec<Domain>, _: u32) -> Result<(), StatusStoreError> { Ok(()) }
+    fn update_status(&self, _: &RequestId, _: &str, _: StatusUpdate) -> Result<(), StatusStoreError> { Ok(()) }
+    fn get(&self, _: &RequestId, _: &str) -> Result<Option<SubmissionStatusRecord>, StatusStoreError> { Ok(None) }
     fn expire_old_records(&self) {}
     fn record_count(&self) -> usize { 0 }
     fn reload_config(&self, _: &StatusConfig) {}
@@ -196,8 +217,8 @@ impl StatusStore for NoopStatusStore {
 
 #[cfg(test)]
 mod tests {
+    use crate::status::SubmissionStatus;
     use super::*;
-    use crate::status::{ErrorCode, SubmissionStatus};
 
     fn test_cfg() -> StatusConfig {
         StatusConfig {
@@ -212,52 +233,47 @@ mod tests {
     }
 
     fn make_record(request_id: RequestId, key_id: &str, ttl: u64) -> SubmissionStatusRecord {
-        use crate::status::recipient_domains_from;
-        SubmissionStatusRecord::new(
-            request_id, key_id.into(),
-            recipient_domains_from(&["user@example.com".to_string()], &[]),
-            1, ttl,
-        )
+        SubmissionStatusRecord::new_received(request_id, key_id.into(), ttl)
     }
 
     #[test]
     fn put_and_get_returns_record() {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "key-a", 3600));
-        assert!(store.get(&id, "key-a").is_some());
+        let _ = store.put_received(make_record(id.clone(), "key-a", 3600));
+        assert!(store.get(&id, "key-a").unwrap().is_some());
     }
 
     #[test]
     fn get_with_wrong_key_returns_none() {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "key-a", 3600));
-        assert!(store.get(&id, "key-b").is_none());
+        let _ = store.put_received(make_record(id.clone(), "key-a", 3600));
+        assert!(store.get(&id, "key-b").unwrap().is_none());
     }
 
     #[test]
     fn expired_record_returns_none() {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "key-a", 0)); // TTL = 0
+        let _ = store.put_received(make_record(id.clone(), "key-a", 0)); // TTL = 0
         // Immediately expired
-        assert!(store.get(&id, "key-a").is_none());
+        assert!(store.get(&id, "key-a").unwrap().is_none());
     }
 
     #[test]
     fn update_status_transitions_correctly() {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "key-a", 3600));
+        let _ = store.put_received(make_record(id.clone(), "key-a", 3600));
 
-        store.update_status(&id, "key-a", StatusUpdate {
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status: SubmissionStatus::SmtpAccepted,
             code: None,
             message: Some("accepted".into()),
-        });
+        }).unwrap();
 
-        let r = store.get(&id, "key-a").unwrap();
+        let r = store.get(&id, "key-a").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted);
     }
 
@@ -265,19 +281,19 @@ mod tests {
     fn terminal_status_is_not_updated() {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "key-a", 3600));
+        let _ = store.put_received(make_record(id.clone(), "key-a", 3600));
 
         // Transition to terminal
-        store.update_status(&id, "key-a", StatusUpdate {
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status: SubmissionStatus::SmtpAccepted, code: None, message: None,
-        });
+        }).unwrap();
         // Attempt further update
-        store.update_status(&id, "key-a", StatusUpdate {
-            status: SubmissionStatus::SmtpFailed, code: Some(ErrorCode::SmtpUnavailable),
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
+            status: SubmissionStatus::SmtpFailed, code: Some(crate::error::ErrorCode::SmtpUnavailable),
             message: None,
-        });
+        }).unwrap();
 
-        let r = store.get(&id, "key-a").unwrap();
+        let r = store.get(&id, "key-a").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted, "terminal status must not change");
     }
 
@@ -286,13 +302,13 @@ mod tests {
         let store = InMemoryStatusStore::new(&test_cfg(), Arc::new(Metrics::new()));
         let id1 = RequestId::new();
         let id2 = RequestId::new();
-        store.put(make_record(id1.clone(), "key-a", 0));    // expired
-        store.put(make_record(id2.clone(), "key-a", 3600)); // valid
+        let _ = store.put_received(make_record(id1.clone(), "key-a", 0));    // expired
+        let _ = store.put_received(make_record(id2.clone(), "key-a", 3600)); // valid
 
         store.expire_old_records();
 
         assert_eq!(store.record_count(), 1);
-        assert!(store.get(&id2, "key-a").is_some());
+        assert!(store.get(&id2, "key-a").unwrap().is_some());
     }
 
     #[test]
@@ -303,7 +319,7 @@ mod tests {
 
         let ids: Vec<RequestId> = (0..3).map(|_| RequestId::new()).collect();
         for id in &ids {
-            store.put(make_record(id.clone(), "key-a", 3600));
+            let _ = store.put_received(make_record(id.clone(), "key-a", 3600));
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
 
@@ -314,8 +330,8 @@ mod tests {
     fn noop_store_always_returns_none() {
         let store = NoopStatusStore;
         let id = RequestId::new();
-        store.put(make_record(id.clone(), "k", 3600));
-        assert!(store.get(&id, "k").is_none());
+        let _ = store.put_received(make_record(id.clone(), "k", 3600));
+        assert!(store.get(&id, "k").unwrap().is_none());
         assert_eq!(store.record_count(), 0);
     }
 }

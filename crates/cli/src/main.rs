@@ -157,21 +157,21 @@ async fn main() {
         });
         tracing::info!(bind_address = %addr, tls = true, "serving HTTPS");
         axum_server::bind_rustls(addr, tls_config)
-            .serve(router.into_make_service())
+            .serve(router.into_make_service_with_connect_info::<std::net::SocketAddr>())
             .await
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "server error");
                 std::process::exit(1);
             });
     } else {
-        axum::serve(listener, router).await.unwrap_or_else(|e| {
+        axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap_or_else(|e| {
             tracing::error!(error = %e, "server error");
             std::process::exit(1);
         });
     }
 
     #[cfg(not(feature = "tls"))]
-    axum::serve(listener, router).await.unwrap_or_else(|e| {
+    axum::serve(listener, router.into_make_service_with_connect_info::<std::net::SocketAddr>()).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "server error");
         std::process::exit(1);
     });

@@ -57,18 +57,18 @@ fn test_config() -> AppConfig {
             request_timeout_seconds: 5,
             shutdown_timeout_seconds: 5,
             concurrency_limit: 0,
+            monitoring_cidrs: vec!["127.0.0.1/32".into()],
             tls_cert: None,
             tls_key: None,
         },
         security: SecurityConfig {
-            require_auth: true,
             trust_proxy_headers: false,
             trusted_source_cidrs: vec![],
             allowed_source_cidrs: vec![],
             api_keys: vec![
                 ApiKeyConfig {
                     id: "enabled-key".into(),
-                    secret: SecretString::new("valid-secret"),
+                    secret: SecretString::new("valid-secret-padded-to-32bytes-xx"),
                     enabled: true,
                     description: None,
                     allowed_recipient_domains: vec!["example.com".into()],
@@ -100,6 +100,10 @@ fn test_config() -> AppConfig {
             max_attachments: 5,
             max_attachment_bytes: 10 * 1024 * 1024,
             max_bulk_messages: 10,
+            allow_html_body: true,
+            allow_attachments: true,
+            allow_bulk_send: true,
+            max_total_attachment_bytes: None,
         },
         smtp: SmtpConfig {
             mode: "smtp".into(),
@@ -215,8 +219,8 @@ async fn sec_008_unknown_field_from_rejected() {
         "body": "Hello.",
         "from": "evil@evil.com"
     });
-    let (status, body) = send_request(&router, Some("valid-secret"), bad).await;
-    assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY, "body={body}");
+    let (status, body) = send_request(&router, Some("valid-secret-padded-to-32bytes-xx"), bad).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "body={body}");
 }
 
 // ---------------------------------------------------------------------------
@@ -232,9 +236,9 @@ async fn sec_009_unknown_field_bcc_rejected() {
         "body": "Hello.",
         "bcc": "spy@evil.com"
     });
-    let (status, _) = send_request(&router, Some("valid-secret"), bad).await;
+    let (status, _) = send_request(&router, Some("valid-secret-padded-to-32bytes-xx"), bad).await;
     assert!(
-        status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::BAD_REQUEST,
+        status == StatusCode::BAD_REQUEST || status == StatusCode::BAD_REQUEST,
         "expected 422 or 400, got {status}"
     );
 }
@@ -252,9 +256,9 @@ async fn sec_010_unknown_field_headers_rejected() {
         "body": "Hello.",
         "headers": {"X-Custom": "injected"}
     });
-    let (status, _) = send_request(&router, Some("valid-secret"), bad).await;
+    let (status, _) = send_request(&router, Some("valid-secret-padded-to-32bytes-xx"), bad).await;
     assert!(
-        status == StatusCode::UNPROCESSABLE_ENTITY || status == StatusCode::BAD_REQUEST,
+        status == StatusCode::BAD_REQUEST || status == StatusCode::BAD_REQUEST,
         "expected 422 or 400, got {status}"
     );
 }
@@ -272,7 +276,7 @@ async fn sec_011_oversized_request_body_returns_413() {
         .method("POST")
         .uri("/v1/send")
         .header(header::CONTENT_TYPE, "application/json")
-        .header(header::AUTHORIZATION, "Bearer valid-secret")
+        .header(header::AUTHORIZATION, "Bearer valid-secret-padded-to-32bytes-xx")
         .body(Body::from(giant))
         .unwrap();
     let resp = router.oneshot(req).await.unwrap();
@@ -295,7 +299,7 @@ async fn from_address_cannot_be_overridden_via_extra_field() {
         "body": "Text.",
         "from": "spoofed@attacker.com"
     });
-    let (status, _) = send_request(&router, Some("valid-secret"), with_from).await;
+    let (status, _) = send_request(&router, Some("valid-secret-padded-to-32bytes-xx"), with_from).await;
     assert_ne!(
         status,
         StatusCode::ACCEPTED,
@@ -334,11 +338,11 @@ mod validation_tests {
                 request_timeout_seconds: 30,
                 shutdown_timeout_seconds: 30,
                 concurrency_limit: 0,
+            monitoring_cidrs: vec!["127.0.0.1/32".into()],
                 tls_cert: None,
                 tls_key: None,
             },
             security: SecurityConfig {
-                require_auth: true,
                 trust_proxy_headers: false,
                 trusted_source_cidrs: vec![],
                     allowed_source_cidrs: vec![],
@@ -364,6 +368,10 @@ mod validation_tests {
                 max_attachments: 5,
                 max_attachment_bytes: 10 * 1024 * 1024,
             max_bulk_messages: 10,
+            allow_html_body: true,
+            allow_attachments: true,
+            allow_bulk_send: true,
+            max_total_attachment_bytes: None,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),

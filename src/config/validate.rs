@@ -62,14 +62,6 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         .map_err(|_| ConfigError::InvalidDefaultFrom)?;
 
     // API keys
-    if config.security.require_auth && config.security.api_keys.is_empty() {
-        return Err(ConfigError::NoApiKeys);
-    }
-    if config.security.require_auth
-        && !config.security.api_keys.iter().any(|k| k.enabled)
-    {
-        return Err(ConfigError::NoEnabledApiKeys);
-    }
 
     // CIDRs — validate both lists
     for cidr in config.security.trusted_source_cidrs.iter()
@@ -118,7 +110,8 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         (None, None) => {}
     }
 
-    // Status store validation (RFC 087, 088, 722)
+    // Status store validation — only when status tracking is enabled (RFC 816)
+    if config.status.enabled {
     if config.status.store == "sqlite" {
         if config.status.db_path.is_none() {
             return Err(ConfigError::Validation(
@@ -145,6 +138,7 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
                 , config.status.store)
         ));
     }
+    } // status.enabled guard (RFC 816)
 
     // Pipe mode: auth credentials are not applicable
     if config.smtp.mode == "pipe"
@@ -172,6 +166,35 @@ pub fn validate_config(config: &AppConfig) -> Result<(), ConfigError> {
         return Err(ConfigError::InvalidLogFormat);
     }
 
+    // RFC 824: API key secret quality enforcement
+    const MIN_SECRET_LEN: usize = 32;
+    const BLOCKED: &[&str] = &[
+        "your-secret-here", "generate-with-openssl-rand-base64-32",
+        "changeme", "secret", "password", "example-secret", "replace-me",
+    ];
+    for key in &config.security.api_keys {
+        let s = key.secret.expose();
+        if s.len() < MIN_SECRET_LEN {
+            return Err(ConfigError::Validation(format!(
+                "api_keys[{}].secret: minimum {} bytes required (got {}).                  Generate with: openssl rand -base64 32",
+                key.id, MIN_SECRET_LEN, s.len()
+            )));
+        }
+        if BLOCKED.iter().any(|b| s.contains(b)) {
+            return Err(ConfigError::Validation(format!(
+                "api_keys[{}].secret: placeholder value detected.                  Replace with: openssl rand -base64 32", key.id
+            )));
+        }
+    }
+
+    // Ensure at least one key is configured and enabled.
+    if config.security.api_keys.is_empty() {
+        return Err(ConfigError::NoApiKeys);
+    }
+    if !config.security.api_keys.iter().any(|k| k.enabled) {
+        return Err(ConfigError::NoEnabledApiKeys);
+    }
+
     Ok(())
 }
 
@@ -184,12 +207,15 @@ mod tests {
     use super::*;
 
     fn minimal_config_str() -> String {
+        // Secret is exactly 32+ bytes: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" (32 'a's)
         r#"
 [server]
 bind_address = "127.0.0.1:8080"
 
-[security]
-require_auth = false
+[[security.api_keys]]
+id      = "test"
+secret  = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+enabled = true
 
 [rate_limit]
 
@@ -221,13 +247,6 @@ default_from = "noreply@example.com"
         let text = minimal_config_str().replace("noreply@example.com", "notanemail");
         let config: AppConfig = toml::from_str(&text).unwrap();
         assert!(matches!(validate_config(&config), Err(ConfigError::InvalidDefaultFrom)));
-    }
-
-    #[test]
-    fn require_auth_no_keys() {
-        let text = minimal_config_str().replace("require_auth = false", "require_auth = true");
-        let config: AppConfig = toml::from_str(&text).unwrap();
-        assert!(matches!(validate_config(&config), Err(ConfigError::NoApiKeys)));
     }
 
     #[test]

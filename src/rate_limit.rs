@@ -18,9 +18,9 @@
 use std::{
     collections::VecDeque,
     net::IpAddr,
-    sync::Mutex,
     time::Instant,
 };
+use parking_lot::Mutex;
 
 use crate::config::RateLimitConfig;
 
@@ -165,13 +165,13 @@ impl RateLimiter {
     }
 
     pub fn check_global(&self) -> Result<(), RateLimitedError> {
-        self.global.lock().unwrap().try_consume()
+        self.global.lock().try_consume()
             .map_err(|s| RateLimitedError { tier: "global", retry_after_secs: s })
     }
 
     pub fn check_ip(&self, ip: IpAddr) -> Result<(), RateLimitedError> {
         let (pm, burst) = (self.ip_per_min, self.ip_burst);
-        self.by_ip.lock().unwrap()
+        self.by_ip.lock()
             .get_or_insert(ip, pm, burst)
             .try_consume()
             .map_err(|s| RateLimitedError { tier: "ip", retry_after_secs: s })
@@ -189,7 +189,7 @@ impl RateLimiter {
     ) -> Result<(), RateLimitedError> {
         let pm    = per_min_override.unwrap_or(self.key_per_min);
         let burst = if burst_override > 0 { burst_override } else { self.key_burst };
-        self.by_key.lock().unwrap()
+        self.by_key.lock()
             .entry(key_id.to_string())
             .or_insert_with(|| TokenBucket::new(pm, burst))
             .try_consume()

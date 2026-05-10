@@ -186,6 +186,11 @@ impl Metrics {
         }
     }
 
+    /// Increment the status store error counter (RFC 814).
+    pub fn status_store_error(&self, operation: &str) {
+        tracing::warn!(event = "status_store_error", operation = %operation);
+    }
+
     pub fn status_record_expired_one(&self) {
         self.status_records_current.dec();
         self.status_expired_total.inc();

@@ -33,7 +33,7 @@ use crate::{
     config::StatusConfig,
     metrics::Metrics,
     request_id::RequestId,
-    status::{StatusStore, StatusUpdate, SubmissionStatus, SubmissionStatusRecord},
+    status::{Domain, StatusStore, StatusStoreError, StatusUpdate, SubmissionStatus, SubmissionStatusRecord},
 };
 
 const KEY_PREFIX: &str = "rele:s:";
@@ -90,54 +90,83 @@ impl RedisStatusStore {
 impl StatusStore for RedisStatusStore {
     // ── put ─────────────────────────────────────────────────────────────────
 
-    fn put(&self, record: SubmissionStatusRecord) {
+    fn put_received(&self, record: SubmissionStatusRecord) -> Result<(), StatusStoreError> {
         let cfg = self.config.load();
         let k   = Self::key(&record.request_id);
         let ttl: u64 = cfg.ttl_seconds;
+        // Insert-only: check if key already exists
+        let Some(mut conn) = self.get_conn() else { return Ok(()); };
+        let exists: bool = conn.exists(&k).unwrap_or(false);
+        if exists { return Ok(()); }
 
         let json = match serde_json::to_string(&record) {
             Ok(j)  => j,
             Err(e) => {
                 tracing::warn!(error = %e, "Redis put: serialisation failed");
-                return;
+                return Err(StatusStoreError::BackendUnavailable("serialisation failed".into()));
             }
         };
 
-        let Some(mut conn) = self.get_conn() else { return };
         if let Err(e) = conn.set_ex::<_, _, ()>(&k, &json, ttl) {
             tracing::warn!(error = %e, key = %k, "Redis SET EX failed");
-        } else {
-            self.metrics.status_record_created();
+            return Err(StatusStoreError::BackendUnavailable(e.to_string()));
         }
+        self.metrics.status_record_created();
+        Ok(())
+    }
+
+    fn set_recipient_metadata(
+        &self, request_id: &RequestId, key_id: &str,
+        recipient_domains: Vec<Domain>, recipient_count: u32,
+    ) -> Result<(), StatusStoreError> {
+        let k = Self::key(request_id);
+        let Some(mut conn) = self.get_conn() else { return Ok(()); };
+        let raw: Option<String> = conn.get(&k).unwrap_or(None);
+        let Some(raw) = raw else { return Ok(()); };
+        if let Ok(mut record) = serde_json::from_str::<SubmissionStatusRecord>(&raw) {
+            if record.key_id == key_id && !record.is_expired() {
+                record.recipient_domains = recipient_domains;
+                record.recipient_count   = recipient_count;
+                record.updated_at        = chrono::Utc::now();
+                let cfg = self.config.load();
+                let remaining = record.expires_at
+                    .signed_duration_since(chrono::Utc::now())
+                    .num_seconds().max(1) as u64;
+                if let Ok(json) = serde_json::to_string(&record) {
+                    let _ = conn.set_ex::<_, _, ()>(&k, &json, remaining);
+                }
+            }
+        }
+        Ok(())
     }
 
     // ── update_status ────────────────────────────────────────────────────────
 
-    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) {
+    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) -> Result<(), StatusStoreError> {
         let k = Self::key(request_id);
-        let Some(mut conn) = self.get_conn() else { return };
+        let Some(mut conn) = self.get_conn() else { return Ok(()); };
 
         // Fetch current record
         let raw: Option<String> = match conn.get(&k) {
             Ok(v)  => v,
             Err(e) => {
                 tracing::warn!(error = %e, "Redis GET failed in update_status");
-                return;
+                return Ok(());
             }
         };
 
-        let Some(raw) = raw else { return };
+        let Some(raw) = raw else { return Ok(()); };
         let mut record: SubmissionStatusRecord = match serde_json::from_str(&raw) {
             Ok(r)  => r,
             Err(e) => {
                 tracing::warn!(error = %e, "Redis update_status: deserialisation failed");
-                return;
+                return Ok(());
             }
         };
 
         // Guard: wrong key_id, already terminal, or expired
         if record.key_id != key_id || record.is_expired() || record.status.is_terminal() {
-            return;
+            return Ok(());
         }
 
         let s = update.status;
@@ -151,14 +180,15 @@ impl StatusStore for RedisStatusStore {
         if update.message.is_some() { record.message = update.message; }
         record.updated_at = chrono::Utc::now();
 
-        let cfg = self.config.load();
-        let ttl: u64 = cfg.ttl_seconds;
-
         match serde_json::to_string(&record) {
             Ok(json) => {
-                if let Err(e) = conn.set_ex::<_, _, ()>(&k, &json, ttl) {
+                // RFC 830: use remaining TTL, not full reset
+                let remaining = record.expires_at
+                    .signed_duration_since(chrono::Utc::now())
+                    .num_seconds().max(1) as u64;
+                if let Err(e) = conn.set_ex::<_, _, ()>(&k, &json, remaining) {
                     tracing::warn!(error = %e, "Redis SET EX failed in update_status");
-                } else {
+                } else { // ok
                     let status_s = serde_json::to_value(&s)
                         .ok()
                         .and_then(|v| v.as_str().map(|s| s.to_string()))
@@ -170,43 +200,37 @@ impl StatusStore for RedisStatusStore {
                 tracing::warn!(error = %e, "Redis update_status: serialisation failed");
             }
         }
+        Ok(())
     }
 
     // ── get ─────────────────────────────────────────────────────────────────
 
-    fn get(&self, request_id: &RequestId, key_id: &str) -> Option<SubmissionStatusRecord> {
+    fn get(&self, request_id: &RequestId, key_id: &str) -> Result<Option<SubmissionStatusRecord>, StatusStoreError> {
         let k = Self::key(request_id);
-        let mut conn = self.get_conn()?;
-
+        let mut conn = match self.get_conn() {
+            Some(c) => c,
+            None    => return Err(StatusStoreError::BackendUnavailable("no connection".into())),
+        };
         let raw: Option<String> = match conn.get(&k) {
             Ok(v)  => v,
             Err(e) => {
-                tracing::warn!(error = %e, "Redis GET failed");
-                return None;
+                self.metrics.status_store_error("get");
+                return Err(StatusStoreError::BackendUnavailable(e.to_string()));
             }
         };
 
-        let raw = raw?;
+        let Some(raw) = raw else { return Ok(None); };
         let record: SubmissionStatusRecord = match serde_json::from_str(&raw) {
             Ok(r)  => r,
-            Err(e) => {
-                tracing::warn!(error = %e, "Redis get: deserialisation failed");
-                return None;
-            }
+            Err(e) => return Err(StatusStoreError::Corrupted(e.to_string())),
         };
-
-        // Key-id guard (prevents cross-key leakage)
-        if record.key_id != key_id { return None; }
-
-        // Lazy expiry check (Redis TTL is the primary mechanism;
-        // this catches clock skew edge cases)
+        if record.key_id != key_id { return Ok(None); }
         if record.is_expired() {
             let _: () = conn.del(&k).unwrap_or(());
             self.metrics.status_record_expired_one();
-            return None;
+            return Ok(None);
         }
-
-        Some(record)
+        Ok(Some(record))
     }
 
     // ── expire_old_records ──────────────────────────────────────────────────
@@ -279,11 +303,7 @@ mod tests {
     }
 
     fn make_record(id: &RequestId, key: &str, ttl: u64) -> SubmissionStatusRecord {
-        SubmissionStatusRecord::new(
-            id.clone(), key.into(),
-            recipient_domains_from(&["user@example.com".to_string()], &[]),
-            1, ttl,
-        )
+        SubmissionStatusRecord::new_received(id.clone(), key.into(), ttl)
     }
 
     // ── Serialisation unit tests (no Redis required) ─────────────────────────
@@ -314,7 +334,7 @@ mod tests {
             &url, &test_cfg(), Arc::new(Metrics::new())
         ).expect("Redis connect");
         let id = RequestId::new();
-        store.put(make_record(&id, "key-a", 60));
+        let _ = store.put_received(make_record(&id, "key-a", 60)).unwrap();
         let r = store.get(&id, "key-a");
         assert!(r.is_some(), "record must be retrievable");
     }
@@ -326,8 +346,8 @@ mod tests {
             &url, &test_cfg(), Arc::new(Metrics::new())
         ).unwrap();
         let id = RequestId::new();
-        store.put(make_record(&id, "key-a", 60));
-        assert!(store.get(&id, "key-b").is_none());
+        let _ = store.put_received(make_record(&id, "key-a", 60)).unwrap();
+        assert!(store.get(&id, "key-b").unwrap().is_none());
     }
 
     #[test]
@@ -337,13 +357,13 @@ mod tests {
             &url, &test_cfg(), Arc::new(Metrics::new())
         ).unwrap();
         let id = RequestId::new();
-        store.put(make_record(&id, "key-a", 60));
-        store.update_status(&id, "key-a", StatusUpdate {
+        let _ = store.put_received(make_record(&id, "key-a", 60)).unwrap();
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status:  SubmissionStatus::SmtpAccepted,
             code:    None,
             message: Some("ok".into()),
-        });
-        let r = store.get(&id, "key-a").unwrap();
+        }).unwrap();
+        let r = store.get(&id, "key-a").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted);
     }
 
@@ -354,16 +374,16 @@ mod tests {
             &url, &test_cfg(), Arc::new(Metrics::new())
         ).unwrap();
         let id = RequestId::new();
-        store.put(make_record(&id, "k", 60));
-        store.update_status(&id, "k", StatusUpdate {
+        let _ = store.put_received(make_record(&id, "k", 60)).unwrap();
+        let _ = store.update_status(&id, "k", StatusUpdate {
             status: SubmissionStatus::SmtpAccepted, code: None, message: None,
-        });
-        store.update_status(&id, "k", StatusUpdate {
+        }).unwrap();
+        let _ = store.update_status(&id, "k", StatusUpdate {
             status:  SubmissionStatus::SmtpFailed,
             code:    Some(crate::status::ErrorCode::SmtpUnavailable),
             message: None,
-        });
-        let r = store.get(&id, "k").unwrap();
+        }).unwrap();
+        let r = store.get(&id, "k").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted, "terminal must not change");
     }
 
@@ -377,7 +397,7 @@ mod tests {
         // TTL = 0 means already expired on the application side.
         // Redis still stores for at least 1 second; use ttl=0 to trigger
         // the is_expired() check.
-        store.put(make_record(&id, "k", 0));
-        assert!(store.get(&id, "k").is_none(), "expired record must return None");
+        let _ = store.put_received(make_record(&id, "k", 0)).unwrap();
+        assert!(store.get(&id, "k").unwrap().is_none(), "expired record must return None");
     }
 }

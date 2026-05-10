@@ -42,9 +42,33 @@ pub async fn get_submission_status(
         }
     };
 
+    // RFC 814: get() returns Result; backend errors → 503
     match state.status_store.get(&request_id, &auth.key_id) {
-        Some(record) => (StatusCode::OK, Json(serialize_record(&record))).into_response(),
-        None => (StatusCode::NOT_FOUND, Json(not_found_body(request_id.as_str()))).into_response(),
+        Ok(Some(record)) => {
+            (StatusCode::OK, Json(serialize_record(&record))).into_response()
+        }
+        Ok(None) => {
+            let body = json!({
+                "status":           "error",
+                "code":             "submission_not_found",
+                "message":          "Submission status was not found or has expired.",
+                "request_id":       &raw_id,
+                "target_request_id": request_id.as_str(),
+            });
+            (StatusCode::NOT_FOUND, Json(body)).into_response()
+        }
+        Err(e) => {
+            tracing::error!(error = %e, event = "status_store_error",
+                request_id = %request_id, "status store get failed");
+            state.metrics.status_store_error("get");
+            let body = json!({
+                "status":     "error",
+                "code":       "status_store_unavailable",
+                "message":    "Status store is temporarily unavailable.",
+                "request_id": &raw_id,
+            });
+            (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
+        }
     }
 }
 

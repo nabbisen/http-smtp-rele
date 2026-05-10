@@ -36,18 +36,18 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             request_timeout_seconds: 5,
             shutdown_timeout_seconds: 5,
             concurrency_limit: 0,
+            monitoring_cidrs: vec!["127.0.0.1/32".into()],
             tls_cert: None,
             tls_key: None,
         },
         security: SecurityConfig {
-            require_auth: true,
             trust_proxy_headers: false,
             trusted_source_cidrs: vec![],
             allowed_source_cidrs: vec![],
             api_keys: vec![
                 ApiKeyConfig {
                     id: "primary".into(),
-                    secret: SecretString::new("primary-secret"),
+                    secret: SecretString::new("primary-secret-padded-to-32bytes!"),  // RFC 824
                     enabled: true,
                     description: None,
                     allowed_recipient_domains: vec!["example.com".into()],
@@ -90,6 +90,10 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             max_attachments: 5,
             max_attachment_bytes: 10 * 1024 * 1024,
             max_bulk_messages: 10,
+            allow_html_body: true,
+            allow_attachments: true,
+            allow_bulk_send: true,
+            max_total_attachment_bytes: None,
         },
         smtp: SmtpConfig {
             mode: "smtp".into(),
@@ -275,7 +279,7 @@ pub async fn send_valid(router: &axum::Router) -> TestResponse {
     send(
         router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(valid_mail_body())
             .build(),
     )

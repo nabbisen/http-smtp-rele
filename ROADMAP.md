@@ -114,3 +114,8 @@ Maintenance: edition 2024, module reorganisation, dep cleanup, test splitting.
 ## v0.14.0 — Shipped (2026-05-10)
 
 Deploy automation: OpenBSD rc.d, Linux systemd, deployment guide.
+
+## v0.15.0 — Shipped (2026-05-11)
+
+Hardening release: architect review remediation (42 RFCs, functional + non-functional).
+Production core re-established; extended features default-off.

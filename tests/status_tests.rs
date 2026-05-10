@@ -32,7 +32,7 @@ async fn sts_001_valid_send_status_smtp_accepted() {
     let status_resp = send(
         &router,
         RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build(),
     ).await;
     status_resp.assert_status(StatusCode::OK);
@@ -51,7 +51,7 @@ async fn sts_002_validation_failure_status_rejected() {
 
     // Send request that will fail validation (disallowed domain)
     let send_resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@disallowed-domain.invalid",
             "subject": "Test",
@@ -64,7 +64,7 @@ async fn sts_002_validation_failure_status_rejected() {
     if !request_id.is_empty() && request_id.starts_with("req_") {
         let status_resp = send(&router,
             RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-                .bearer("primary-secret")
+                .bearer("primary-secret-padded-to-32bytes!")
                 .build()).await;
         // Either rejected or not found depending on where rejection happened
         assert!(
@@ -88,7 +88,7 @@ async fn sts_004_smtp_unavailable_status_failed() {
 
     // Get the raw response to read the X-Request-Id header
     let raw_req = RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(common::valid_mail_body())
         .build();
 
@@ -107,7 +107,7 @@ async fn sts_004_smtp_unavailable_status_failed() {
 
     let status_resp = send(&router,
         RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build()).await;
     status_resp.assert_status(StatusCode::OK);
     assert_eq!(status_resp.body["status"], "smtp_failed");
@@ -120,7 +120,7 @@ async fn sts_005_different_key_receives_404() {
     let stub = SmtpStub::start(0).await;
     let router = test_router(stub.port());
 
-    let send_resp = send_valid(&router).await;  // sent with "primary-secret"
+    let send_resp = send_valid(&router).await;  // sent with "primary-secret-padded-to-32bytes!"
     send_resp.assert_status(StatusCode::ACCEPTED);
     let request_id = send_resp.body["request_id"].as_str().unwrap().to_string();
 
@@ -142,7 +142,7 @@ async fn sts_006_unknown_request_id_returns_404() {
     let fake_id = "req_01HX7Q9V6R6W9V8Y5E3E6E7M9A";
     let status_resp = send(&router,
         RequestBuilder::get(&format!("/v1/submissions/{fake_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build()).await;
     status_resp.assert_status(StatusCode::NOT_FOUND);
     assert_eq!(status_resp.body["code"], "submission_not_found");
@@ -155,7 +155,7 @@ async fn sts_007_status_response_excludes_sensitive_data() {
     let router = test_router(stub.port());
 
     let _ = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "Secret subject",
@@ -169,13 +169,13 @@ async fn sts_007_status_response_excludes_sensitive_data() {
 
     let status_resp = send(&router,
         RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build()).await;
 
     let body_str = status_resp.body.to_string();
     assert!(!body_str.contains("Secret subject"), "subject must not appear in status");
     assert!(!body_str.contains("Secret body"), "body must not appear in status");
-    assert!(!body_str.contains("primary-secret"), "API key must not appear in status");
+    assert!(!body_str.contains("primary-secret-padded-to-32bytes!"), "API key must not appear in status");
     assert!(!body_str.contains("user@example.com"), "full recipient address must not appear");
 
     stub.shutdown().await;
@@ -210,7 +210,7 @@ async fn sts_009_disabled_status_tracking_returns_404() {
 
     // Even after a successful send (port 1 → 502, but request_id exists)
     let send_resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(common::valid_mail_body())
         .build()).await;
 
@@ -218,7 +218,7 @@ async fn sts_009_disabled_status_tracking_returns_404() {
     if request_id.starts_with("req_") {
         let status_resp = send(&router,
             RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-                .bearer("primary-secret")
+                .bearer("primary-secret-padded-to-32bytes!")
                 .build()).await;
         status_resp.assert_status(StatusCode::NOT_FOUND);
     }
@@ -231,7 +231,7 @@ async fn sts_010_invalid_request_id_format_returns_404() {
     let bad_id = "not-a-valid-id";
     let resp = send(&router,
         RequestBuilder::get(&format!("/v1/submissions/{bad_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build()).await;
     resp.assert_status(StatusCode::NOT_FOUND);
 }
@@ -273,7 +273,7 @@ async fn status_store_metrics_in_prometheus_output() {
 async fn keys_self_returns_key_config() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::get("/v1/keys/self")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .build()).await;
     resp.assert_status(StatusCode::OK);
     assert_eq!(resp.body["id"], "primary");
@@ -296,7 +296,7 @@ async fn keys_self_unauthenticated_returns_401() {
 async fn keys_self_includes_effective_rates() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::get("/v1/keys/self")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .build()).await;
     resp.assert_status(StatusCode::OK);
     assert!(resp.body.get("effective_rate_limit_per_min").is_some(),
@@ -329,7 +329,7 @@ async fn per_key_mask_recipient_override_true() {
 
     // Key info should reflect the override
     let resp = send(&router, RequestBuilder::get("/v1/keys/self")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .build()).await;
     assert_eq!(resp.status, StatusCode::OK);
     assert_eq!(resp.body["mask_recipient"], true);
@@ -364,7 +364,7 @@ mod sqlite_tests {
 
         let status = send(&router,
             RequestBuilder::get(&format!("/v1/submissions/{id}"))
-                .bearer("primary-secret").build()).await;
+                .bearer("primary-secret-padded-to-32bytes!").build()).await;
         status.assert_status(StatusCode::OK);
         assert_eq!(status.body["status"], "smtp_accepted");
 
@@ -460,7 +460,7 @@ mod sqlite_tests {
 
         let status = send(&router,
             RequestBuilder::get(&format!("/v1/submissions/{id}"))
-                .bearer("primary-secret").build()).await;
+                .bearer("primary-secret-padded-to-32bytes!").build()).await;
         status.assert_status(StatusCode::OK);
 
         let body_str = status.body.to_string();
@@ -508,7 +508,7 @@ async fn sqlite_store_persists_status_records() {
     let status_resp = send(
         &router,
         RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build(),
     ).await;
     status_resp.assert_status(StatusCode::OK);
@@ -551,7 +551,7 @@ async fn sqlite_store_data_accessible_from_shared_store() {
     let status  = send(
         &router2,
         RequestBuilder::get(&format!("/v1/submissions/{rid}"))
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .build(),
     ).await;
     status.assert_status(StatusCode::OK);
@@ -569,10 +569,9 @@ fn non_sqlite_build_rejects_sqlite_store_config() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]

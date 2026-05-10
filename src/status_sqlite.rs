@@ -35,7 +35,8 @@ use crate::{
     config::StatusConfig,
     metrics::Metrics,
     request_id::RequestId,
-    status::{ErrorCode, StatusStore, StatusUpdate, SubmissionStatus, SubmissionStatusRecord},
+    error::ErrorCode,
+    status::{Domain, StatusStore, StatusStoreError, StatusUpdate, SubmissionStatus, SubmissionStatusRecord},
 };
 
 // ---------------------------------------------------------------------------
@@ -110,18 +111,18 @@ impl SqliteStatusStore {
 impl StatusStore for SqliteStatusStore {
     // ── put ─────────────────────────────────────────────────────────────────
 
-    fn put(&self, record: SubmissionStatusRecord) {
-        let conn    = self.conn.lock().unwrap();
+    fn put_received(&self, record: SubmissionStatusRecord) -> Result<(), StatusStoreError> {
+        let conn    = self.conn.lock().unwrap_or_else(|p| p.into_inner());
         let cfg     = self.config.load();
 
-        // Enforce max_records: evict oldest before inserting.
+        // Enforce max_records.
         evict_if_needed(&conn, cfg.max_records);
 
         let domains_json =
             serde_json::to_string(&record.recipient_domains).unwrap_or_else(|_| "[]".into());
 
         let result = conn.execute(
-            "INSERT OR REPLACE INTO submission_statuses
+            "INSERT OR IGNORE INTO submission_statuses
              (request_id, key_id, status, code, message, recipient_domains,
               recipient_count, created_at, updated_at, expires_at)
              VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)",
@@ -139,19 +140,39 @@ impl StatusStore for SqliteStatusStore {
             ],
         );
 
-        if let Err(e) = result {
-            error!(error = %e, "SQLite put failed");
-            return;
+        match result {
+            Ok(1) => { self.metrics.status_record_created(); }
+            Ok(_) => {} // duplicate key → no-op
+            Err(e) => {
+                error!(error = %e, event = "status_store_error", operation = "put_received");
+                self.metrics.status_store_error("put_received");
+                return Err(StatusStoreError::BackendUnavailable(e.to_string()));
+            }
         }
+        Ok(())
+    }
 
-        self.metrics.status_record_created();
+    fn set_recipient_metadata(
+        &self, request_id: &RequestId, key_id: &str,
+        recipient_domains: Vec<Domain>, recipient_count: u32,
+    ) -> Result<(), StatusStoreError> {
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
+        let domains_json = serde_json::to_string(&recipient_domains)
+            .unwrap_or_else(|_| "[]".into());
+        let _ = conn.execute(
+            "UPDATE submission_statuses
+             SET recipient_domains = ?1, recipient_count = ?2
+             WHERE request_id = ?3 AND key_id = ?4",
+            rusqlite::params![domains_json, recipient_count as i64, request_id.as_str(), key_id],
+        );
+        Ok(())
     }
 
     // ── update_status ────────────────────────────────────────────────────────
 
-    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) {
+    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate) -> Result<(), StatusStoreError> {
         let now  = Utc::now();
-        let conn = self.conn.lock().unwrap();
+        let conn = self.conn.lock().unwrap_or_else(|p| p.into_inner());
 
         let s = status_str(&update.status);
         let c = update.code.as_ref().map(code_str);
@@ -176,17 +197,17 @@ impl StatusStore for SqliteStatusStore {
         .unwrap_or(0);
 
         if rows > 0 {
-            self.metrics
-                .status_transitioned(s, c.as_deref().unwrap_or("none"));
+            self.metrics.status_transitioned(s, c.as_deref().unwrap_or("none"));
         }
+        Ok(())
     }
 
     // ── get ─────────────────────────────────────────────────────────────────
 
-    fn get(&self, request_id: &RequestId, key_id: &str) -> Option<SubmissionStatusRecord> {
+    fn get(&self, request_id: &RequestId, key_id: &str) -> Result<Option<SubmissionStatusRecord>, StatusStoreError> {
         let now     = Utc::now();
         let now_str = now.to_rfc3339();
-        let conn    = self.conn.lock().unwrap();
+        let conn    = self.conn.lock().unwrap_or_else(|p| p.into_inner());
 
         let result = conn.query_row(
             "SELECT request_id, key_id, status, code, message,
@@ -199,24 +220,19 @@ impl StatusStore for SqliteStatusStore {
         );
 
         match result {
-            Ok(record) => Some(record),
+            Ok(record) => Ok(Some(record)),
             Err(rusqlite::Error::QueryReturnedNoRows) => {
-                // Lazy expiry: delete the record if it exists but has expired.
-                let deleted = conn
-                    .execute(
-                        "DELETE FROM submission_statuses
-                         WHERE request_id = ?1 AND expires_at <= ?2",
-                        params![request_id.as_str(), &now_str],
-                    )
-                    .unwrap_or(0);
-                if deleted > 0 {
-                    self.metrics.status_record_expired_one();
-                }
-                None
+                let deleted = conn.execute(
+                    "DELETE FROM submission_statuses WHERE request_id = ?1 AND expires_at <= ?2",
+                    params![request_id.as_str(), &now_str],
+                ).unwrap_or(0);
+                if deleted > 0 { self.metrics.status_record_expired_one(); }
+                Ok(None)
             }
             Err(e) => {
-                error!(error = %e, "SQLite get failed");
-                None
+                error!(error = %e, event = "status_store_error", operation = "get");
+                self.metrics.status_store_error("get");
+                Err(StatusStoreError::BackendUnavailable(e.to_string()))
             }
         }
     }
@@ -424,13 +440,7 @@ mod tests {
     }
 
     fn make_record(id: &RequestId, key: &str, ttl: u64) -> SubmissionStatusRecord {
-        SubmissionStatusRecord::new(
-            id.clone(),
-            key.into(),
-            recipient_domains_from(&["user@example.com".to_string()], &[]),
-            1,
-            ttl,
-        )
+        SubmissionStatusRecord::new_received(id.clone(), key.into(), ttl)
     }
 
     #[test]
@@ -455,37 +465,37 @@ mod tests {
     fn put_and_get_returns_record() {
         let store = make_store();
         let id    = RequestId::new();
-        store.put(make_record(&id, "key-a", 3600));
-        assert!(store.get(&id, "key-a").is_some());
+        let _ = store.put_received(make_record(&id, "key-a", 3600)).unwrap();
+        assert!(store.get(&id, "key-a").unwrap().is_some());
     }
 
     #[test]
     fn get_wrong_key_returns_none() {
         let store = make_store();
         let id    = RequestId::new();
-        store.put(make_record(&id, "key-a", 3600));
-        assert!(store.get(&id, "key-b").is_none());
+        let _ = store.put_received(make_record(&id, "key-a", 3600)).unwrap();
+        assert!(store.get(&id, "key-b").unwrap().is_none());
     }
 
     #[test]
     fn expired_record_returns_none() {
         let store = make_store();
         let id    = RequestId::new();
-        store.put(make_record(&id, "key-a", 0)); // TTL=0 → already expired
-        assert!(store.get(&id, "key-a").is_none());
+        let _ = store.put_received(make_record(&id, "key-a", 0)).unwrap(); // TTL=0 → already expired
+        assert!(store.get(&id, "key-a").unwrap().is_none());
     }
 
     #[test]
     fn update_transitions_status() {
         let store = make_store();
         let id    = RequestId::new();
-        store.put(make_record(&id, "key-a", 3600));
-        store.update_status(&id, "key-a", StatusUpdate {
+        let _ = store.put_received(make_record(&id, "key-a", 3600)).unwrap();
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status:  SubmissionStatus::SmtpAccepted,
             code:    None,
             message: Some("OK".into()),
-        });
-        let r = store.get(&id, "key-a").unwrap();
+        }).unwrap();
+        let r = store.get(&id, "key-a").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted);
     }
 
@@ -493,16 +503,16 @@ mod tests {
     fn terminal_status_not_overwritten() {
         let store = make_store();
         let id    = RequestId::new();
-        store.put(make_record(&id, "key-a", 3600));
-        store.update_status(&id, "key-a", StatusUpdate {
+        let _ = store.put_received(make_record(&id, "key-a", 3600)).unwrap();
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status: SubmissionStatus::SmtpAccepted, code: None, message: None,
-        });
-        store.update_status(&id, "key-a", StatusUpdate {
+        }).unwrap();
+        let _ = store.update_status(&id, "key-a", StatusUpdate {
             status: SubmissionStatus::SmtpFailed,
             code:   Some(ErrorCode::SmtpUnavailable),
             message: None,
-        });
-        let r = store.get(&id, "key-a").unwrap();
+        }).unwrap();
+        let r = store.get(&id, "key-a").unwrap().unwrap();
         assert_eq!(r.status, SubmissionStatus::SmtpAccepted, "terminal must not change");
     }
 
@@ -511,11 +521,11 @@ mod tests {
         let store = make_store();
         let id1   = RequestId::new();
         let id2   = RequestId::new();
-        store.put(make_record(&id1, "key-a", 0));    // expired
-        store.put(make_record(&id2, "key-a", 3600)); // valid
+        let _ = store.put_received(make_record(&id1, "key-a", 0)).unwrap();    // expired
+        let _ = store.put_received(make_record(&id2, "key-a", 3600)).unwrap(); // valid
         store.expire_old_records();
         assert_eq!(store.record_count(), 1);
-        assert!(store.get(&id2, "key-a").is_some());
+        assert!(store.get(&id2, "key-a").unwrap().is_some());
     }
 
     #[test]
@@ -527,7 +537,7 @@ mod tests {
         let store = SqliteStatusStore::open(&path, &cfg, Arc::new(Metrics::new())).unwrap();
 
         for _ in 0..3 {
-            store.put(make_record(&RequestId::new(), "key-a", 3600));
+            let _ = store.put_received(make_record(&RequestId::new(), "key-a", 3600)).unwrap();
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
         assert!(store.record_count() <= 2, "must be capped at max_records");
@@ -539,7 +549,7 @@ mod tests {
         let id    = RequestId::new();
         let mut r = make_record(&id, "secret-key-id", 3600);
         r.message = Some("The message was accepted.".into()); // safe fixed text
-        store.put(r.clone());
+        let _ = store.put_received(r.clone()).unwrap();
 
         let fetched = store.get(&id, "secret-key-id").unwrap();
         let serialised = serde_json::to_string(&fetched).unwrap();

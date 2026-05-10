@@ -125,9 +125,26 @@ impl AppState {
     /// Replace the stored config atomically (called on SIGHUP, RFC 305).
     ///
     /// SIGHUP-reloadable status fields: `ttl_seconds`, `max_records`, `cleanup_interval_seconds`.
+    /// Apply SIGHUP reload. Restart-required fields that changed cause a warning
+    /// and are ignored — only reloadable fields take effect (RFC 811).
     pub fn reload_config(&self, new_config: config::AppConfig) {
-        self.status_store.reload_config(&new_config.status);
-        self.config_store.store(Arc::new(new_config));
+        let current = self.config();
+
+        // Warn and skip if restart-required fields changed.
+        let restart_fields = config::restart_required_changes(&current, &new_config);
+        if !restart_fields.is_empty() {
+            tracing::warn!(
+                event  = "sighup_restart_required",
+                fields = %restart_fields.join(", "),
+                "SIGHUP reload rejected for these fields — restart required"
+            );
+            // Still apply reloadable fields by building a merged config.
+        }
+
+        // Build merged config: reloadable fields from new, restart-required from current.
+        let merged = config::merge_reloadable(&current, &new_config);
+        self.status_store.reload_config(&merged.status);
+        self.config_store.store(Arc::new(merged));
         tracing::info!(event = "config_reloaded");
     }
 }

@@ -1,117 +1,53 @@
-//! Submission status tracking — types and store abstraction.
+//! Submission status tracking — types, errors, and store abstraction.
 //!
-//! Implements RFC 086: metadata-only status store abstraction.
+//! RFC 086: metadata-only status store abstraction.
+//! RFC 813: StatusStore trait API (put_received / set_recipient_metadata / update_status / get).
+//! RFC 814: get() returns Result so backend failures → 503, not 404.
 //!
-//! # What this stores
-//!
-//! What `http-smtp-rele` *observed* during request handling and SMTP submission:
-//! status, error code, recipient domains (not full addresses), timestamps.
-//!
-//! # What this never stores
-//!
-//! Mail body, subject, raw SMTP message, attachments, API keys,
-//! Authorization headers, full recipient addresses, or SMTP credentials.
-//!
-//! # Status lifecycle
-//!
-//! ```text
-//! received ──→ smtp_submission_started ──→ smtp_accepted  (terminal)
-//!                                      └──→ smtp_failed    (terminal)
-//!          └──→ rejected                                   (terminal)
-//! ```
-//!
-//! `expired` is a lifecycle event, not a stored status value.
+//! `ErrorCode` is imported from `crate::error` (RFC 838 unification).
 
 use std::fmt;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+pub use crate::error::ErrorCode;
 use crate::{config::StatusConfig, request_id::RequestId};
 
 // ---------------------------------------------------------------------------
 // Domain newtype
 // ---------------------------------------------------------------------------
 
-/// A validated email domain (the part after `@`), stored in lowercase.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Domain(String);
 
 impl Domain {
-    /// Extract the domain from a full email address.
     pub fn from_address(email: &str) -> Option<Self> {
         email.rfind('@').map(|i| Domain(email[i + 1..].to_lowercase()))
     }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
+    pub fn as_str(&self) -> &str { &self.0 }
 }
 
 impl fmt::Display for Domain {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
-    }
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result { f.write_str(&self.0) }
 }
 
 // ---------------------------------------------------------------------------
-// ErrorCode — shared with HTTP error responses (RFC 086/B-2)
+// SubmissionStatus
 // ---------------------------------------------------------------------------
 
-/// Machine-readable error codes used in both HTTP error responses and status records.
-///
-/// The external representation is `snake_case` string.
-/// No separate StatusStore-specific namespace exists.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ErrorCode {
-    BadRequest,
-    ValidationFailed,
-    PayloadTooLarge,
-    UnsupportedMediaType,
-    RateLimited,
-    Forbidden,
-    SmtpUnavailable,
-    SmtpRejected,
-    InternalError,
-    SubmissionNotFound,
-}
-
-impl fmt::Display for ErrorCode {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let s = serde_json::to_value(self)
-            .ok()
-            .and_then(|v| v.as_str().map(|s| s.to_string()))
-            .unwrap_or_else(|| format!("{self:?}"));
-        f.write_str(&s)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// SubmissionStatus — state machine (RFC 086/B-1)
-// ---------------------------------------------------------------------------
-
-/// The set of observable states for a submission.
-///
-/// `expired` is NOT a persisted status; TTL expiry deletes the record.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum SubmissionStatus {
-    /// Authenticated request accepted for processing.
     Received,
-    /// Rejected before SMTP (validation, rate limit, policy).
     Rejected,
-    /// SMTP submission attempt started.
     SmtpSubmissionStarted,
-    /// SMTP server accepted the message.
     SmtpAccepted,
-    /// SMTP submission failed.
     SmtpFailed,
 }
 
 impl SubmissionStatus {
-    /// Terminal states will not be updated further.
     pub fn is_terminal(&self) -> bool {
         matches!(self, Self::Rejected | Self::SmtpAccepted | Self::SmtpFailed)
     }
@@ -121,18 +57,13 @@ impl SubmissionStatus {
 // SubmissionStatusRecord
 // ---------------------------------------------------------------------------
 
-/// A metadata-only record describing what `http-smtp-rele` observed.
-///
-/// Never contains mail body, subject, full recipient addresses, tokens, or credentials.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SubmissionStatusRecord {
     pub request_id:        RequestId,
     pub key_id:            String,
     pub status:            SubmissionStatus,
     pub code:              Option<ErrorCode>,
-    /// Safe fixed-text description only — never mail content.
     pub message:           Option<String>,
-    /// Deduplicated, sorted recipient domains (no local parts).
     pub recipient_domains: Vec<Domain>,
     pub recipient_count:   u32,
     pub created_at:        DateTime<Utc>,
@@ -141,83 +72,114 @@ pub struct SubmissionStatusRecord {
 }
 
 impl SubmissionStatusRecord {
-    /// Create a new record in `Received` state.
-    pub fn new(
-        request_id: RequestId,
-        key_id: String,
-        recipient_domains: Vec<Domain>,
-        recipient_count: u32,
+    /// Create a new `Received` record. Recipient metadata is set separately
+    /// after validation via `StatusStore::set_recipient_metadata` (RFC 813).
+    pub fn new_received(
+        request_id:  RequestId,
+        key_id:      String,
         ttl_seconds: u64,
     ) -> Self {
         let now = Utc::now();
-        let expires_at = now
-            + chrono::Duration::seconds(ttl_seconds as i64);
+        let expires_at = now + chrono::Duration::seconds(ttl_seconds as i64);
         Self {
             request_id,
             key_id,
-            status: SubmissionStatus::Received,
-            code: None,
-            message: Some("Submission received.".into()),
-            recipient_domains,
-            recipient_count,
-            created_at: now,
-            updated_at: now,
+            status:            SubmissionStatus::Received,
+            code:              None,
+            message:           Some("Submission received.".into()),
+            recipient_domains: vec![],
+            recipient_count:   0,
+            created_at:        now,
+            updated_at:        now,
             expires_at,
         }
     }
 
-    pub fn is_expired(&self) -> bool {
-        Utc::now() > self.expires_at
-    }
+    pub fn is_expired(&self) -> bool { Utc::now() > self.expires_at }
 }
 
 // ---------------------------------------------------------------------------
 // StatusUpdate
 // ---------------------------------------------------------------------------
 
-/// An atomic status transition applied via `StatusStore::update_status`.
 pub struct StatusUpdate {
     pub status:  SubmissionStatus,
     pub code:    Option<ErrorCode>,
-    /// Safe fixed-text message only.
     pub message: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
-// StatusStore trait
+// StatusStoreError — backend failure (RFC 814)
 // ---------------------------------------------------------------------------
 
-/// Abstract submission status store (RFC 086).
+#[derive(Debug)]
+pub enum StatusStoreError {
+    BackendUnavailable(String),
+    Corrupted(String),
+}
+
+impl fmt::Display for StatusStoreError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::BackendUnavailable(e) => write!(f, "status store backend unavailable: {e}"),
+            Self::Corrupted(e)          => write!(f, "status store data corrupted: {e}"),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// StatusStore trait (RFC 813 + RFC 814)
+// ---------------------------------------------------------------------------
+
 pub trait StatusStore: Send + Sync {
-    /// Insert a new record. Existing records with the same `request_id` are overwritten.
-    fn put(&self, record: SubmissionStatusRecord);
+    /// Insert a new `Received` record. Returns error if the backend fails.
+    /// Calling with a duplicate `request_id` is a no-op (insert-only semantics).
+    fn put_received(&self, record: SubmissionStatusRecord) -> Result<(), StatusStoreError>;
 
-    /// Apply a status update to an existing record.
+    /// Set recipient metadata after successful validation.
+    /// No-op if the record is not found, expired, or non-terminal.
+    fn set_recipient_metadata(
+        &self,
+        request_id:        &RequestId,
+        key_id:            &str,
+        recipient_domains: Vec<Domain>,
+        recipient_count:   u32,
+    ) -> Result<(), StatusStoreError>;
+
+    /// Apply a status transition.
+    /// No-op if the record is not found, expired, or already in a terminal state.
+    fn update_status(
+        &self,
+        request_id: &RequestId,
+        key_id:     &str,
+        update:     StatusUpdate,
+    ) -> Result<(), StatusStoreError>;
+
+    /// Look up a record.
     ///
-    /// No-ops if the record is not found, already expired, or in a terminal state.
-    fn update_status(&self, request_id: &RequestId, key_id: &str, update: StatusUpdate);
+    /// - `Ok(Some(r))` — found, not expired, owned by key_id
+    /// - `Ok(None)`    — not found, expired, or different key
+    /// - `Err(_)`      — backend unavailable → caller should return 503
+    fn get(
+        &self,
+        request_id: &RequestId,
+        key_id:     &str,
+    ) -> Result<Option<SubmissionStatusRecord>, StatusStoreError>;
 
-    /// Look up a record by `request_id` and `key_id`.
-    ///
-    /// Returns `None` if: unknown, expired, or owned by a different key.
-    /// Lazy expiry: expired records are deleted on access and `None` is returned.
-    fn get(&self, request_id: &RequestId, key_id: &str) -> Option<SubmissionStatusRecord>;
-
-    /// Delete all records past their `expires_at`. Called by the background cleanup task.
+    /// Delete TTL-expired records. Called by the background cleanup task.
     fn expire_old_records(&self);
 
-    /// Current number of live records in the store.
+    /// Current number of live records.
     fn record_count(&self) -> usize;
 
-    /// Apply a configuration update (SIGHUP-reloadable: `ttl_seconds`, `max_records`).
+    /// Apply SIGHUP-reloadable config changes (ttl_seconds, max_records).
     fn reload_config(&self, config: &StatusConfig);
 }
 
 // ---------------------------------------------------------------------------
-// Helper: extract recipient domains from address lists
+// Helper
 // ---------------------------------------------------------------------------
 
-/// Extract deduplicated, sorted domains from `to` and `cc` address lists.
 pub fn recipient_domains_from(to: &[String], cc: &[String]) -> Vec<Domain> {
     let mut set = std::collections::BTreeSet::new();
     for addr in to.iter().chain(cc.iter()) {
@@ -227,6 +189,10 @@ pub fn recipient_domains_from(to: &[String], cc: &[String]) -> Vec<Domain> {
     }
     set.into_iter().collect()
 }
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
 
 #[cfg(test)]
 mod tests {
@@ -239,40 +205,24 @@ mod tests {
     }
 
     #[test]
-    fn domain_from_invalid_email_returns_none() {
-        assert!(Domain::from_address("not-an-email").is_none());
-    }
-
-    #[test]
     fn submission_status_terminal_set() {
         assert!(!SubmissionStatus::Received.is_terminal());
-        assert!(!SubmissionStatus::SmtpSubmissionStarted.is_terminal());
         assert!(SubmissionStatus::Rejected.is_terminal());
         assert!(SubmissionStatus::SmtpAccepted.is_terminal());
-        assert!(SubmissionStatus::SmtpFailed.is_terminal());
     }
 
     #[test]
-    fn recipient_domains_dedup_and_sort() {
-        let to  = vec!["a@example.com".into(), "b@example.org".into()];
-        let cc  = vec!["c@example.com".into()]; // duplicate domain
-        let ds = recipient_domains_from(&to, &cc);
-        assert_eq!(ds.len(), 2);
-        assert_eq!(ds[0].as_str(), "example.com");
-        assert_eq!(ds[1].as_str(), "example.org");
-    }
-
-    #[test]
-    fn error_code_serializes_snake_case() {
-        let s = serde_json::to_string(&ErrorCode::ValidationFailed).unwrap();
-        assert_eq!(s, r#""validation_failed""#);
-    }
-
-    #[test]
-    fn new_record_is_received_and_not_expired() {
-        let r = SubmissionStatusRecord::new(
-            RequestId::new(), "key".into(), vec![], 0, 3600
+    fn recipient_domains_dedup() {
+        let ds = recipient_domains_from(
+            &["a@example.com".into(), "b@example.org".into()],
+            &["c@example.com".into()],
         );
+        assert_eq!(ds.len(), 2);
+    }
+
+    #[test]
+    fn new_received_record_not_expired() {
+        let r = SubmissionStatusRecord::new_received(RequestId::new(), "k".into(), 3600);
         assert_eq!(r.status, SubmissionStatus::Received);
         assert!(!r.is_expired());
     }

@@ -141,6 +141,14 @@ pub fn validate_mail_request(
     config: &AppConfig,
     auth: &AuthContext,
 ) -> Result<ValidatedMailRequest, AppError> {
+    // RFC 823: feature gate checks
+    if req.body_html.is_some() && !config.mail.allow_html_body {
+        return Err(AppError::FeatureDisabled("html body is not enabled on this server".into()));
+    }
+    if req.attachments.as_ref().map_or(false, |a| !a.is_empty()) && !config.mail.allow_attachments {
+        return Err(AppError::FeatureDisabled("attachments are not enabled on this server".into()));
+    }
+
     let mail_cfg = &config.mail;
 
     // 1. `to` — validate each recipient (RFC 302)
@@ -240,19 +248,34 @@ pub fn validate_mail_request(
             )));
         }
         let mut validated = Vec::with_capacity(specs.len());
-        for spec in specs {
+        let mut total_decoded_bytes: usize = 0;
+        for (i, spec) in specs.into_iter().enumerate() {
             // Filename safety
             if spec.filename.is_empty() || spec.filename.len() > 255 {
                 return Err(AppError::Validation("attachments[].filename: must be 1–255 chars".into()));
             }
-            if spec.filename.contains('/') || spec.filename.contains('\\') || spec.filename.contains(' ') {
+            if spec.filename.contains('/') || spec.filename.contains('\\') || spec.filename.contains('\0') {
                 return Err(AppError::Validation("attachments[].filename: path separators not allowed".into()));
             }
             sanitize::reject_header_crlf("attachments[].filename", &spec.filename)?;
 
             // Content-type: basic non-empty check
-            if spec.content_type.is_empty() || !spec.content_type.contains('/') {
-                return Err(AppError::Validation("attachments[].content_type: must be a valid MIME type".into()));
+            if spec.content_type.is_empty()
+                || !spec.content_type.contains('/')
+                || sanitize::contains_header_injection(&spec.content_type)
+                || sanitize::contains_control_chars(&spec.content_type)
+            {
+                return Err(AppError::Validation(
+                    "attachments[].content_type: invalid format or forbidden characters".into(),
+                ));
+            }
+
+            // RFC 826: pre-decode encoded-size check (avoids decoding giant payloads)
+            let max_encoded = (mail_cfg.max_attachment_bytes * 4 / 3) + 8;
+            if spec.data.len() > max_encoded {
+                return Err(AppError::Validation(format!(
+                    "attachments[{}].data: encoded size {} bytes exceeds limit", i, spec.data.len()
+                )));
             }
 
             // Decode base64
@@ -260,7 +283,7 @@ pub fn validate_mail_request(
                 .decode(&spec.data)
                 .map_err(|_| AppError::Validation("attachments[].data: invalid base64".into()))?;
 
-            // Size check
+            // Per-attachment size check
             if decoded.len() > mail_cfg.max_attachment_bytes {
                 return Err(AppError::Validation(format!(
                     "attachments[].data: decoded size {} exceeds maximum {}",
@@ -268,6 +291,15 @@ pub fn validate_mail_request(
                 )));
             }
 
+            total_decoded_bytes += decoded.len();
+            if let Some(max_total) = mail_cfg.max_total_attachment_bytes {
+                if total_decoded_bytes > max_total {
+                    return Err(AppError::Validation(format!(
+                        "attachments: total decoded size {} exceeds aggregate limit {}",
+                        total_decoded_bytes, max_total
+                    )));
+                }
+            }
             validated.push(ValidatedAttachment {
                 filename: spec.filename,
                 content_type: spec.content_type,

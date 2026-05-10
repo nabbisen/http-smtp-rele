@@ -10,13 +10,12 @@
 //! bind_address = "127.0.0.1:8080"
 //!
 //! [security]
-//! require_auth = true
-//! trust_proxy_headers = false
+//! //! trust_proxy_headers = false
 //! trusted_source_cidrs = ["127.0.0.1/32"]
 //!
 //! [[security.api_keys]]
 //! id = "svc-a"
-//! secret = "tok-..."
+//! secret = "tok-...xxxxxxxxxxxxxxxxxxxxxxxxx"
 //! enabled = true
 //!
 //! [mail]
@@ -158,12 +157,14 @@ pub struct ServerConfig {
     pub tls_cert: Option<std::path::PathBuf>,
     /// PEM private key for HTTPS (RFC 712). Both cert and key must be set.
     pub tls_key:  Option<std::path::PathBuf>,
+    /// CIDRs allowed to access /metrics and /readyz without authentication.
+    /// Default: loopback only (RFC 822).
+    #[serde(default = "default_monitoring_cidrs")]
+    pub monitoring_cidrs: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct SecurityConfig {
-    #[serde(default = "default_true")]
-    pub require_auth: bool,
     /// When true, read `X-Forwarded-For` to resolve client IP.
     /// Only applies when the peer IP is listed in `trusted_source_cidrs`.
     #[serde(default)]
@@ -228,6 +229,18 @@ pub struct MailConfig {
     /// Maximum number of messages per `POST /v1/send-bulk` request (RFC 701).
     #[serde(default = "default_max_bulk_messages")]
     pub max_bulk_messages: usize,
+    /// Allow HTML body in submissions (RFC 823 — default: false for attack surface reduction).
+    #[serde(default)]
+    pub allow_html_body: bool,
+    /// Allow file attachments in submissions (RFC 823 — default: false).
+    #[serde(default)]
+    pub allow_attachments: bool,
+    /// Allow bulk send via POST /v1/send-bulk (RFC 823 — default: false).
+    #[serde(default)]
+    pub allow_bulk_send: bool,
+    /// Aggregate maximum decoded bytes across all attachments in one request (RFC 826).
+    /// `None` = no aggregate limit (only per-attachment limit applies).
+    pub max_total_attachment_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -370,8 +383,7 @@ pub enum ConfigError {
 
     #[error("invalid mail.default_from: must be a valid email address")]
     InvalidDefaultFrom,
-
-    #[error("security.require_auth is true but no api_keys are defined")]
+    #[error("no api_keys are configured")]
     NoApiKeys,
 
     #[error("no api_keys entries have enabled = true")]
@@ -404,3 +416,69 @@ pub mod validate;
 pub use validate::{load, load_from_str, validate_config};
 
 fn default_max_bulk_messages() -> usize { 10 }
+
+fn default_monitoring_cidrs() -> Vec<String> { vec!["127.0.0.1/32".into(), "::1/128".into()] }
+
+// ---------------------------------------------------------------------------
+// RFC 811: SIGHUP reload boundary helpers
+// ---------------------------------------------------------------------------
+
+/// Returns a list of field names that changed and require a restart.
+///
+/// Reloadable fields: mail.*, security.api_keys, status.ttl_seconds,
+/// status.max_records, status.cleanup_interval_seconds, logging.*
+pub fn restart_required_changes(old: &AppConfig, new: &AppConfig) -> Vec<String> {
+    let mut changed = Vec::new();
+
+    macro_rules! check {
+        ($field:expr, $label:literal) => {
+            if $field { changed.push($label.into()); }
+        };
+    }
+
+    check!(old.server.bind_address        != new.server.bind_address,        "server.bind_address");
+    check!(old.server.request_timeout_seconds != new.server.request_timeout_seconds, "server.request_timeout_seconds");
+    check!(old.server.max_request_body_bytes  != new.server.max_request_body_bytes,  "server.max_request_body_bytes");
+    check!(old.server.concurrency_limit   != new.server.concurrency_limit,    "server.concurrency_limit");
+    check!(old.smtp.host                  != new.smtp.host,                   "smtp.host");
+    check!(old.smtp.port                  != new.smtp.port,                   "smtp.port");
+    check!(old.smtp.mode                  != new.smtp.mode,                   "smtp.mode");
+    check!(old.rate_limit.global_per_min  != new.rate_limit.global_per_min,   "rate_limit.global_per_min");
+    check!(old.rate_limit.per_ip_per_min  != new.rate_limit.per_ip_per_min,   "rate_limit.per_ip_per_min");
+    check!(old.rate_limit.per_key_per_min != new.rate_limit.per_key_per_min,  "rate_limit.per_key_per_min");
+    check!(old.security.trust_proxy_headers   != new.security.trust_proxy_headers,   "security.trust_proxy_headers");
+    check!(old.security.trusted_source_cidrs  != new.security.trusted_source_cidrs,  "security.trusted_source_cidrs");
+    check!(old.security.allowed_source_cidrs  != new.security.allowed_source_cidrs,  "security.allowed_source_cidrs");
+    check!(old.status.enabled             != new.status.enabled,              "status.enabled");
+    check!(old.status.store               != new.status.store,                "status.store");
+    check!(old.status.db_path             != new.status.db_path,              "status.db_path");
+    check!(old.status.redis_url           != new.status.redis_url,            "status.redis_url");
+
+    changed
+}
+
+/// Build a merged config that applies only reloadable fields from `new`,
+/// keeping restart-required fields from `current`.
+pub fn merge_reloadable(current: &AppConfig, new: &AppConfig) -> AppConfig {
+    AppConfig {
+        // Restart-required: keep current values
+        server:     current.server.clone(),
+        smtp:       current.smtp.clone(),
+        rate_limit: current.rate_limit.clone(),
+        // Reloadable: take new values
+        security:   new.security.clone(),
+        mail:       new.mail.clone(),
+        logging:    new.logging.clone(),
+        status: StatusConfig {
+            // Non-reloadable status fields kept from current
+            enabled:  current.status.enabled,
+            store:    current.status.store.clone(),
+            db_path:  current.status.db_path.clone(),
+            redis_url: current.status.redis_url.clone(),
+            // Reloadable status fields from new
+            ttl_seconds:              new.status.ttl_seconds,
+            max_records:              new.status.max_records,
+            cleanup_interval_seconds: new.status.cleanup_interval_seconds,
+        },
+    }
+}

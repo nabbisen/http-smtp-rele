@@ -11,7 +11,7 @@
 //! `config.mail.default_from_name`.
 
 use lettre::{
-    message::{Attachment, header::ContentType, Mailbox, Message, MultiPart, SinglePart},
+    message::{Attachment, Mailbox, Message, MultiPart, SinglePart},
 };
 use tracing::error;
 
@@ -51,19 +51,20 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
     let mut builder = Message::builder().from(from_mailbox);
     for addr in &validated.to {
         let to_mailbox: Mailbox = addr.parse().map_err(|e| {
-            error!(error = %e, addr = %addr, "invalid to address after validation");
+            error!(error = %e, domain = %addr.rfind('@').map(|i| &addr[i+1..]).unwrap_or("?"), "invalid to address after validation");
             AppError::Internal
         })?;
         builder = builder.to(to_mailbox);
     }
     let mut builder = builder
-        .subject(validated.subject.clone())
-        .header(ContentType::TEXT_PLAIN);
+        .subject(validated.subject.clone());
+    // Note: ContentType is set by lettre based on the body type;
+    // do NOT set TEXT_PLAIN here — multipart messages would get a conflicting header (RFC 808).
 
     // CC addresses (RFC 404).
     for addr in &validated.cc {
         let cc_mailbox: Mailbox = addr.parse().map_err(|e| {
-            error!(error = %e, addr = %addr, "invalid cc address after validation");
+            error!(error = %e, domain = %addr.rfind('@').map(|i| &addr[i+1..]).unwrap_or("?"), "invalid cc address after validation");
             AppError::Internal
         })?;
         builder = builder.cc(cc_mailbox);
@@ -74,7 +75,7 @@ pub fn build_message(validated: &ValidatedMailRequest, config: &AppConfig) -> Re
         let rt_mailbox: Mailbox = reply_to_addr
             .parse()
             .map_err(|e| {
-                error!(error = %e, addr = %reply_to_addr, "invalid reply_to after validation");
+                error!(error = %e, "invalid reply_to address after validation");
                 AppError::Internal
             })?;
         builder = builder.reply_to(rt_mailbox);
@@ -146,11 +147,11 @@ mod tests {
                 request_timeout_seconds: 30,
                 shutdown_timeout_seconds: 30,
                 concurrency_limit: 0,
+            monitoring_cidrs: vec!["127.0.0.1/32".into()],
                 tls_cert: None,
                 tls_key: None,
             },
             security: SecurityConfig {
-                require_auth: true,
                 trust_proxy_headers: false,
                 trusted_source_cidrs: vec![],
                 api_keys: vec![ApiKeyConfig {
@@ -176,6 +177,10 @@ mod tests {
                 max_attachments: 5,
                 max_attachment_bytes: 10 * 1024 * 1024,
             max_bulk_messages: 10,
+            allow_html_body: true,
+            allow_attachments: true,
+            allow_bulk_send: true,
+            max_total_attachment_bytes: None,
             },
             smtp: SmtpConfig {
                 mode: "smtp".into(),

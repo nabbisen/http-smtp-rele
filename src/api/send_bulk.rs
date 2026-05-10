@@ -19,14 +19,16 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
 use crate::{
-    api::{send::MailRequest, ExtractRequestId},
+    api::ExtractRequestId,
+    validation::{self, MailRequest},
     auth::AuthContext,
     error::AppError,
-    mail, smtp, validation,
+    mail, smtp,
     config::AppConfig,
     request_id::RequestId,
+    error::ErrorCode,
     status::{
-        recipient_domains_from, ErrorCode, StatusUpdate, SubmissionStatus,
+        recipient_domains_from, StatusUpdate, SubmissionStatus,
         SubmissionStatusRecord,
     },
     AppState,
@@ -208,8 +210,8 @@ async fn phase1_prepare(
     }
 
     // Initial status record
-    state.status_store.put(SubmissionStatusRecord::new(
-        req_id.clone(), auth.key_id.clone(), vec![], 0, cfg.status.ttl_seconds,
+    let _ = state.status_store.put_received(SubmissionStatusRecord::new_received(
+        req_id.clone(), auth.key_id.clone(), cfg.status.ttl_seconds,
     ));
 
     // Validate
@@ -220,7 +222,7 @@ async fn phase1_prepare(
             tracing::warn!(event = "validation_failure", index, key_id = %auth.key_id,
                 error = %e);
             let code = apperr_to_code(&e);
-            state.status_store.update_status(&req_id, &auth.key_id, StatusUpdate {
+            let _ = state.status_store.update_status(&req_id, &auth.key_id, StatusUpdate {
                 status:  SubmissionStatus::Rejected,
                 code:    Some(code.clone()),
                 message: Some("Request rejected during validation.".into()),
@@ -232,19 +234,9 @@ async fn phase1_prepare(
     // Update status with real recipient domains
     let domains = recipient_domains_from(&validated.to, &validated.cc);
     let count   = (validated.to.len() + validated.cc.len()) as u32;
-    state.status_store.put(SubmissionStatusRecord {
-        request_id:        req_id.clone(),
-        key_id:            auth.key_id.clone(),
-        status:            SubmissionStatus::Received,
-        code:              None,
-        message:           Some("Validated.".into()),
-        recipient_domains: domains,
-        recipient_count:   count,
-        created_at:        chrono::Utc::now(),
-        updated_at:        chrono::Utc::now(),
-        expires_at:        chrono::Utc::now()
-            + chrono::Duration::seconds(cfg.status.ttl_seconds as i64),
-    });
+    let _ = state.status_store.set_recipient_metadata(
+        &req_id, &auth.key_id, domains, count,
+    );
 
     let recipient_domain = validated.to.first()
         .and_then(|a| a.split('@').nth(1))
@@ -259,7 +251,7 @@ async fn phase1_prepare(
     let message = match mail::build_message(&validated, cfg) {
         Ok(m) => m,
         Err(e) => {
-            state.status_store.update_status(&req_id, &auth.key_id, StatusUpdate {
+            let _ = state.status_store.update_status(&req_id, &auth.key_id, StatusUpdate {
                 status:  SubmissionStatus::Rejected,
                 code:    Some(ErrorCode::InternalError),
                 message: Some("Failed to build mail message.".into()),
@@ -288,7 +280,7 @@ async fn phase2_submit(
     state: &Arc<AppState>,
     cfg:   &Arc<AppConfig>,
 ) -> MessageResult {
-    state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
+    let _ = state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
         status:  SubmissionStatus::SmtpSubmissionStarted,
         code:    None,
         message: Some("Submitting to SMTP.".into()),
@@ -308,7 +300,7 @@ async fn phase2_submit(
 
     match result {
         Ok(()) => {
-            state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
+            let _ = state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
                 status:  SubmissionStatus::SmtpAccepted,
                 code:    None,
                 message: Some("Accepted by SMTP server.".into()),
@@ -329,7 +321,7 @@ async fn phase2_submit(
             state.metrics.inc_smtp_error();
             tracing::error!(event = "smtp_failure", key_id = %p.key_id,
                 recipient_domain = logged_domain, index = p.index, error = %e);
-            state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
+            let _ = state.status_store.update_status(&p.req_id, &p.key_id, StatusUpdate {
                 status:  SubmissionStatus::SmtpFailed,
                 code:    Some(ErrorCode::SmtpUnavailable),
                 message: Some("SMTP server unavailable.".into()),
@@ -352,18 +344,10 @@ fn store_rejected(
     msg: &str,
     ttl: u64,
 ) {
-    state.status_store.put(SubmissionStatusRecord {
-        request_id:        req_id.clone(),
-        key_id:            key_id.to_string(),
-        status:            SubmissionStatus::Rejected,
-        code:              Some(code),
-        message:           Some(msg.to_string()),
-        recipient_domains: vec![],
-        recipient_count:   0,
-        created_at:        chrono::Utc::now(),
-        updated_at:        chrono::Utc::now(),
-        expires_at:        chrono::Utc::now()
-            + chrono::Duration::seconds(ttl as i64),
+    let record = SubmissionStatusRecord::new_received(req_id.clone(), key_id.to_string(), ttl);
+    let _ = state.status_store.put_received(record);
+    let _ = state.status_store.update_status(req_id, key_id, StatusUpdate {
+        status: SubmissionStatus::Rejected, code: Some(code), message: Some(msg.to_string()),
     });
 }
 

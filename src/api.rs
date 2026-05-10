@@ -75,11 +75,16 @@ pub fn build_router(state: Arc<AppState>) -> Router {
     let mut router = Router::new()
         .route("/healthz", get(health::healthz))
         .route("/readyz",  get(health::readyz))
-        .route("/metrics", get(metrics_handler::metrics_handler))
+        .route("/metrics", get(metrics_handler::metrics_handler_no_ci))
         .route("/v1/submissions/{request_id}", get(submissions::get_submission_status))
         .route("/v1/keys/self", get(keys::get_key_self))
         .route("/v1/send", axum::routing::post(send::send_mail))
-        .route("/v1/send-bulk", axum::routing::post(send_bulk::send_bulk))
+        // RFC 823: bulk send is disabled by default (allow_bulk_send = false)
+        .route("/v1/send-bulk", if cfg.mail.allow_bulk_send {
+            axum::routing::post(send_bulk::send_bulk)
+        } else {
+            axum::routing::post(|| async { axum::http::StatusCode::NOT_FOUND })
+        })
         .layer(middleware::from_fn(request_id_layer))
         .layer(TraceLayer::new_for_http())
         .layer(TimeoutLayer::with_status_code(

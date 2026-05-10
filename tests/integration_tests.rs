@@ -81,7 +81,7 @@ async fn sec_008_unknown_field_from_rejected() {
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(json!({
                 "to": "user@example.com",
                 "subject": "Test",
@@ -104,7 +104,7 @@ async fn sec_009_unknown_field_bcc_rejected() {
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(json!({
                 "to": "user@example.com",
                 "subject": "Test",
@@ -127,7 +127,7 @@ async fn sec_010_unknown_field_headers_rejected() {
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(json!({
                 "to": "user@example.com",
                 "subject": "Test",
@@ -157,7 +157,7 @@ async fn sec_011_oversized_body_returns_413() {
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .raw_body(big.as_bytes())
             .build(),
     )
@@ -197,7 +197,7 @@ async fn sec_013_rate_limit_exceeded_returns_429() {
 #[tokio::test]
 async fn sec_015_auth_failure_body_has_no_token() {
     let router = test_router_no_smtp();
-    let secret = "ultra-secret-token-xyz";
+    let secret = "ultra-secret-token-xyzxxxxxxxxxx";
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
@@ -320,7 +320,7 @@ async fn e2e_007_request_id_consistent() {
     let router = test_router(stub.port());
 
     let req = RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(common::valid_mail_body())
         .build();
 
@@ -357,7 +357,7 @@ async fn e2e_008_mail_envelope_and_body_correct() {
     let _ = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(json!({
                 "to": "alice@example.com",
                 "subject": "Hello Alice",
@@ -376,7 +376,7 @@ async fn e2e_008_mail_envelope_and_body_correct() {
         msg.body
     );
     assert!(
-        !msg.body.contains("primary-secret"),
+        !msg.body.contains("primary-secret-padded-to-32bytes!"),
         "API secret must not appear in the submitted mail body"
     );
 
@@ -393,7 +393,7 @@ async fn e2e_009_wrong_content_type_returns_415() {
     let resp = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .content_type("text/plain")
             .raw_body(b"not json".to_vec())
             .build(),
@@ -420,7 +420,7 @@ async fn from_address_always_from_config() {
     let _ = send(
         &router,
         RequestBuilder::post("/v1/send")
-            .bearer("primary-secret")
+            .bearer("primary-secret-padded-to-32bytes!")
             .json(json!({
                 "to": "user@example.com",
                 "subject": "Test",
@@ -459,13 +459,13 @@ async fn per_key_burst_override_respected() {
 
     // Exhaust the 2-token burst
     let _ = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+        .bearer("primary-secret-padded-to-32bytes!").json(common::valid_mail_body()).build()).await;
     let _ = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+        .bearer("primary-secret-padded-to-32bytes!").json(common::valid_mail_body()).build()).await;
 
     // Third request should be rate-limited for this key
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+        .bearer("primary-secret-padded-to-32bytes!").json(common::valid_mail_body()).build()).await;
     resp.assert_status(StatusCode::TOO_MANY_REQUESTS)
         .assert_code("rate_limited");
 }
@@ -484,9 +484,9 @@ async fn per_key_default_rate_distinct_from_ip_rate() {
 
     // With per_ip burst=1, the second request from the same IP hits IP rate limit
     let _ = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+        .bearer("primary-secret-padded-to-32bytes!").json(common::valid_mail_body()).build()).await;
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret").json(common::valid_mail_body()).build()).await;
+        .bearer("primary-secret-padded-to-32bytes!").json(common::valid_mail_body()).build()).await;
     resp.assert_status(StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(resp.body["code"], "rate_limited");
 }
@@ -504,7 +504,7 @@ async fn per_address_allowlist_permits_listed_address() {
     let router = api::build_router(AppState::new(cfg));
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "alice@example.com",
             "subject": "Hi",
@@ -524,14 +524,14 @@ async fn per_address_allowlist_blocks_unlisted_address() {
     let router = api::build_router(AppState::new(cfg));
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "bob@example.com",
             "subject": "Hi",
             "body": "Hello."
         }))
         .build()).await;
-    resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY)
+    resp.assert_status(StatusCode::BAD_REQUEST)
         .assert_code("validation_failed");
 }
 
@@ -547,17 +547,17 @@ async fn per_address_empty_list_falls_through_to_domain_policy() {
 
     // Within allowed domain — reaches SMTP
     let ok = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({"to":"any@example.com","subject":"Hi","body":"Hi"}))
         .build()).await;
     assert_ne!(ok.status, StatusCode::BAD_REQUEST, "should pass domain check");
 
     // Outside allowed domain — blocked
     let blocked = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({"to":"evil@evil.com","subject":"Hi","body":"Hi"}))
         .build()).await;
-    blocked.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+    blocked.assert_status(StatusCode::BAD_REQUEST);
 }
 
 // ===========================================================================
@@ -586,9 +586,9 @@ async fn smtp_auth_user_only_fails_config_validation() {
     let toml = r#"
 [mail]
 default_from = "r@example.com"
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 enabled = true
 [smtp]
 auth_user = "user@example.com"
@@ -610,7 +610,7 @@ async fn multi_recipient_array_delivers_to_all() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": ["alice@example.com", "bob@example.com"],
             "subject": "Multi-recipient test",
@@ -648,7 +648,7 @@ async fn multi_recipient_string_still_works() {
 async fn multi_recipient_empty_array_rejected() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": [],
             "subject": "Hi",
@@ -680,7 +680,7 @@ async fn forwarded_header_resolved_when_trusted_proxy() {
     let resp = send(&router, axum::http::Request::builder()
         .method("POST")
         .uri("/v1/send")
-        .header(header::AUTHORIZATION, "Bearer primary-secret")
+        .header(header::AUTHORIZATION, "Bearer primary-secret-padded-to-32bytes!")
         .header(header::CONTENT_TYPE, "application/json")
         .header("forwarded", "for=10.0.0.1")
         .body(axum::body::Body::from(
@@ -800,7 +800,7 @@ async fn html_body_accepted_and_forwarded() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "HTML Test",
@@ -829,7 +829,7 @@ async fn plain_body_without_html_still_works() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "Plain Only",
@@ -851,7 +851,7 @@ async fn cc_string_forwarded_to_smtp() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "alice@example.com",
             "cc": "bob@example.com",
@@ -870,7 +870,7 @@ async fn cc_array_accepted() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "alice@example.com",
             "cc": ["bob@example.com"],
@@ -888,7 +888,7 @@ async fn cc_invalid_address_rejected() {
     let router = test_router_no_smtp();
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "alice@example.com",
             "cc": "not-an-email",
@@ -928,7 +928,7 @@ async fn attachment_base64_forwarded_to_smtp() {
     let b64 = base64::engine::general_purpose::STANDARD.encode(content);
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "With attachment",
@@ -954,7 +954,7 @@ async fn attachment_base64_forwarded_to_smtp() {
 async fn attachment_invalid_base64_rejected() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "Bad attachment",
@@ -973,7 +973,7 @@ async fn attachment_invalid_base64_rejected() {
 async fn attachment_path_traversal_filename_rejected() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "subject": "Bad filename",
@@ -998,7 +998,7 @@ async fn reply_to_string_accepted() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "reply_to": "support@example.com",
@@ -1016,7 +1016,7 @@ async fn reply_to_array_accepted() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({
             "to": "user@example.com",
             "reply_to": ["alice@example.com", "bob@example.com"],

@@ -105,7 +105,8 @@ pub fn build_transport(cfg: &SmtpConfig) -> Result<SmtpTransport, AppError> {
 /// |---------------------|------------------------|
 /// | Timeout             | `AppError::SmtpUnavailable` |
 /// | Connection refused  | `AppError::SmtpUnavailable` |
-/// | SMTP rejection      | `AppError::SmtpUnavailable` |
+/// | SMTP 4xx/5xx        | `AppError::SmtpRejected` |
+/// | Connection failure  | `AppError::SmtpUnavailable` |
 pub async fn submit(
     transport: &SmtpTransport,
     message: Message,
@@ -120,8 +121,19 @@ pub async fn submit(
     match result {
         Ok(Ok(_response)) => Ok(()),
         Ok(Err(e)) => {
-            error!(smtp_error = %e, "SMTP submission failed");
-            Err(AppError::SmtpUnavailable)
+            // RFC 810: classify lettre errors into SMTP rejection vs unavailability.
+            // lettre::error::Error wraps SmtpError; response codes indicate rejection.
+            let error_str = e.to_string();
+            let is_rejection = error_str.contains("Permanent") // SMTP 5xx
+                || error_str.contains("Transient")             // SMTP 4xx
+                || error_str.contains("ReplyCode");
+            if is_rejection {
+                error!(smtp_error = %e, "SMTP server rejected the message");
+                Err(AppError::SmtpRejected)
+            } else {
+                error!(smtp_error = %e, "SMTP server unavailable");
+                Err(AppError::SmtpUnavailable)
+            }
         }
         Err(_elapsed) => {
             error!("SMTP submission timed out after {timeout_seconds}s");

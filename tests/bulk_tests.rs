@@ -34,7 +34,7 @@ async fn bulk_001_two_valid_messages_accepted() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(two_valid_messages()))
         .build()).await;
 
@@ -59,7 +59,7 @@ async fn bulk_002_one_valid_one_invalid_partial() {
         {"to": "evil@disallowed.invalid",    "subject": "Bad", "body": "Hello."}
     ]);
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(msgs))
         .build()).await;
 
@@ -80,7 +80,7 @@ async fn bulk_002_one_valid_one_invalid_partial() {
 async fn bulk_003_empty_array_returns_400() {
     let router = test_router_no_smtp();
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(serde_json::json!([])))
         .build()).await;
     resp.assert_status(StatusCode::BAD_REQUEST);
@@ -99,7 +99,7 @@ async fn bulk_004_exceeds_max_messages_returns_400() {
                                      "subject": "S", "body": "B"}))
         .collect();
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(serde_json::json!(msgs)))
         .build()).await;
     resp.assert_status(StatusCode::PAYLOAD_TOO_LARGE);
@@ -112,7 +112,7 @@ async fn bulk_005_each_message_has_unique_request_id() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(two_valid_messages()))
         .build()).await;
 
@@ -134,7 +134,7 @@ async fn bulk_006_per_message_status_queryable() {
     let router = test_router(stub.port());
 
     let bulk_resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(two_valid_messages()))
         .build()).await;
     bulk_resp.assert_status(StatusCode::ACCEPTED);
@@ -144,7 +144,7 @@ async fn bulk_006_per_message_status_queryable() {
         let rid = r["request_id"].as_str().unwrap();
         let status_resp = send(&router,
             RequestBuilder::get(&format!("/v1/submissions/{rid}"))
-                .bearer("primary-secret")
+                .bearer("primary-secret-padded-to-32bytes!")
                 .build()).await;
         status_resp.assert_status(StatusCode::OK);
         assert_eq!(status_resp.body["status"], "smtp_accepted");
@@ -176,14 +176,14 @@ async fn bulk_008_response_excludes_sensitive_data() {
         "body": "SecretBody456"
     }]);
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(msgs))
         .build()).await;
 
     let body_str = resp.body.to_string();
     assert!(!body_str.contains("SecretSubject123"), "subject must not appear in response");
     assert!(!body_str.contains("SecretBody456"),    "body must not appear in response");
-    assert!(!body_str.contains("primary-secret"),   "token must not appear in response");
+    assert!(!body_str.contains("primary-secret-padded-to-32bytes!"),   "token must not appear in response");
     assert!(!body_str.contains("alice@example.com"), "full address must not appear in response");
 
     stub.shutdown().await;
@@ -196,7 +196,7 @@ async fn bulk_009_bulk_request_id_format() {
     let router = test_router(stub.port());
 
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(two_valid_messages()))
         .build()).await;
 
@@ -212,7 +212,7 @@ async fn bulk_all_smtp_failed_returns_202_with_rejected() {
     let router = test_router(1); // port 1 has no listener
 
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(bulk_body(two_valid_messages()))
         .build()).await;
 
@@ -247,7 +247,7 @@ async fn bulk_parallelism_results_in_index_order() {
         .collect();
 
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({"messages": msgs}))
         .build()).await;
 
@@ -278,7 +278,7 @@ async fn bulk_concurrency_zero_means_unlimited() {
         }))
         .collect();
     let resp = send(&router, RequestBuilder::post("/v1/send-bulk")
-        .bearer("primary-secret")
+        .bearer("primary-secret-padded-to-32bytes!")
         .json(serde_json::json!({"messages": msgs}))
         .build()).await;
 
@@ -299,10 +299,9 @@ fn tls_cert_without_key_rejected() {
 bind_address = "127.0.0.1:8080"
 tls_cert = "/tmp/cert.pem"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -325,10 +324,9 @@ fn tls_key_without_cert_rejected() {
 bind_address = "127.0.0.1:8080"
 tls_key = "/tmp/key.pem"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -347,10 +345,9 @@ fn no_tls_config_is_valid_plain_http() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -372,10 +369,9 @@ bind_address = "127.0.0.1:8080"
 tls_cert = "/tmp/cert.pem"
 tls_key  = "/tmp/key.pem"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -404,10 +400,9 @@ fn sighup_reload_config_structure_valid() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -430,10 +425,9 @@ fn redis_store_without_url_rejected() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -457,10 +451,9 @@ fn non_redis_build_rejects_redis_store() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
@@ -483,10 +476,9 @@ fn unknown_store_value_rejected() {
 [server]
 bind_address = "127.0.0.1:8080"
 [security]
-require_auth = false
-[[api_keys]]
+[[security.api_keys]]
 id = "k"
-secret = "s"
+secret = "sxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 [mail]
 default_from = "a@example.com"
 allowed_recipient_domains = ["example.com"]
