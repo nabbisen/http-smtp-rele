@@ -110,6 +110,7 @@ pub fn test_config(smtp_port: u16) -> AppConfig {
             level: "error".into(), // suppress tracing output during tests
             mask_recipient: false,
         },
+        status: Default::default(),
     }
 }
 

@@ -9,8 +9,9 @@
 //! 6. Bind TCP listener
 //! 7. Apply runtime security restrictions (OpenBSD: drop rpath)
 //! 8. Spawn SIGHUP config-reload handler (RFC 305)
-//! 9. Log `app.started`
-//! 10. Serve
+//! 9. Spawn status store background cleanup task (RFC 087)
+//! 10. Log `app.started`
+//! 11. Serve
 
 use std::{path::PathBuf, sync::Arc};
 
@@ -104,14 +105,29 @@ async fn main() {
         });
     }
 
-    // 9. Log startup
+    // 9. Status store background cleanup (RFC 087).
+    //
+    // Hybrid cleanup: lazy expiry on get() + periodic background cleanup.
+    // Only spawned when status tracking is enabled.
+    if config.status.enabled {
+        let cleanup_store   = Arc::clone(&state.status_store);
+        let cleanup_interval = config.status.cleanup_interval_seconds;
+        tokio::spawn(async move {
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(cleanup_interval)).await;
+                cleanup_store.expire_old_records();
+            }
+        });
+    }
+
+    // 10. Log startup
     tracing::info!(
         version = env!("CARGO_PKG_VERSION"),
         bind_address = %bind_addr,
         "app.started"
     );
 
-    // 10. Serve
+    // 11. Serve
     let router = api::build_router(state);
     axum::serve(listener, router).await.unwrap_or_else(|e| {
         tracing::error!(error = %e, "server error");

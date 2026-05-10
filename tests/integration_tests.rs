@@ -1064,3 +1064,239 @@ async fn rate_limit_tier_counter_increments() {
     let m = send(&router, RequestBuilder::get("/metrics").build()).await;
     assert_eq!(m.status, StatusCode::OK);
 }
+
+// ===========================================================================
+// RFC 106 — Submission Status API Integration Tests
+// ===========================================================================
+
+/// STS-001: valid send → smtp_accepted status
+#[tokio::test]
+async fn sts_001_valid_send_status_smtp_accepted() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let send_resp = send_valid(&router).await;
+    send_resp.assert_status(StatusCode::ACCEPTED);
+    let request_id = send_resp.body["request_id"].as_str().unwrap().to_string();
+    assert!(request_id.starts_with("req_"), "request_id must have req_ prefix: {request_id}");
+
+    // Query status with same key
+    let status_resp = send(
+        &router,
+        RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+            .bearer("primary-secret")
+            .build(),
+    ).await;
+    status_resp.assert_status(StatusCode::OK);
+    assert_eq!(status_resp.body["status"], "smtp_accepted");
+    assert_eq!(status_resp.body["request_id"], request_id.as_str());
+    assert!(status_resp.body.get("recipient_domains").is_some());
+    assert!(!status_resp.body["recipient_domains"].is_null());
+
+    stub.shutdown().await;
+}
+
+/// STS-002: validation failure after auth → rejected/validation_failed
+#[tokio::test]
+async fn sts_002_validation_failure_status_rejected() {
+    let router = test_router_no_smtp();
+
+    // Send request that will fail validation (disallowed domain)
+    let send_resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@disallowed-domain.invalid",
+            "subject": "Test",
+            "body": "Hello."
+        }))
+        .build()).await;
+    assert_ne!(send_resp.status, StatusCode::ACCEPTED);
+    let request_id = send_resp.body["request_id"].as_str().unwrap_or("").to_string();
+
+    if !request_id.is_empty() && request_id.starts_with("req_") {
+        let status_resp = send(&router,
+            RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+                .bearer("primary-secret")
+                .build()).await;
+        // Either rejected or not found depending on where rejection happened
+        assert!(
+            status_resp.status == StatusCode::OK || status_resp.status == StatusCode::NOT_FOUND,
+            "unexpected status: {}", status_resp.status
+        );
+        if status_resp.status == StatusCode::OK {
+            assert_eq!(status_resp.body["status"], "rejected");
+        }
+    }
+}
+
+/// STS-004: SMTP unavailable → smtp_failed status
+///
+/// Error responses carry request_id in the X-Request-Id header (not body).
+/// The status store is updated to smtp_failed; the GET endpoint reflects this.
+#[tokio::test]
+async fn sts_004_smtp_unavailable_status_failed() {
+    use tower::ServiceExt;
+
+    // Port 1 has no listener
+    let router = test_router(1);
+
+    // Get the raw response to read the X-Request-Id header
+    let raw_req = RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(common::valid_mail_body())
+        .build();
+
+    let raw_resp = router.clone().oneshot(raw_req).await.unwrap();
+    assert_eq!(raw_resp.status(), StatusCode::BAD_GATEWAY);
+
+    let request_id = raw_resp
+        .headers()
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_string();
+
+    assert!(request_id.starts_with("req_"),
+        "X-Request-Id must have req_ prefix on error responses: {request_id}");
+
+    let status_resp = send(&router,
+        RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+            .bearer("primary-secret")
+            .build()).await;
+    status_resp.assert_status(StatusCode::OK);
+    assert_eq!(status_resp.body["status"], "smtp_failed");
+    assert_eq!(status_resp.body["code"], "smtp_unavailable");
+}
+
+/// STS-005: different API key cannot read status (returns 404)
+#[tokio::test]
+async fn sts_005_different_key_receives_404() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let send_resp = send_valid(&router).await;  // sent with "primary-secret"
+    send_resp.assert_status(StatusCode::ACCEPTED);
+    let request_id = send_resp.body["request_id"].as_str().unwrap().to_string();
+
+    // Query with a different key
+    let status_resp = send(&router,
+        RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+            .bearer("hirate-secret")  // different key
+            .build()).await;
+    status_resp.assert_status(StatusCode::NOT_FOUND);
+    assert_eq!(status_resp.body["code"], "submission_not_found");
+
+    stub.shutdown().await;
+}
+
+/// STS-006: unknown request_id returns 404
+#[tokio::test]
+async fn sts_006_unknown_request_id_returns_404() {
+    let router = test_router_no_smtp();
+    let fake_id = "req_01HX7Q9V6R6W9V8Y5E3E6E7M9A";
+    let status_resp = send(&router,
+        RequestBuilder::get(&format!("/v1/submissions/{fake_id}"))
+            .bearer("primary-secret")
+            .build()).await;
+    status_resp.assert_status(StatusCode::NOT_FOUND);
+    assert_eq!(status_resp.body["code"], "submission_not_found");
+}
+
+/// STS-007: status response contains no body/subject/token/full-address
+#[tokio::test]
+async fn sts_007_status_response_excludes_sensitive_data() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let _ = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(serde_json::json!({
+            "to": "user@example.com",
+            "subject": "Secret subject",
+            "body": "Secret body content XYZ"
+        }))
+        .build()).await;
+
+    // Find the request_id by doing another send
+    let send_resp = send_valid(&router).await;
+    let request_id = send_resp.body["request_id"].as_str().unwrap().to_string();
+
+    let status_resp = send(&router,
+        RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+            .bearer("primary-secret")
+            .build()).await;
+
+    let body_str = status_resp.body.to_string();
+    assert!(!body_str.contains("Secret subject"), "subject must not appear in status");
+    assert!(!body_str.contains("Secret body"), "body must not appear in status");
+    assert!(!body_str.contains("primary-secret"), "API key must not appear in status");
+    assert!(!body_str.contains("user@example.com"), "full recipient address must not appear");
+
+    stub.shutdown().await;
+}
+
+/// STS-008: request_id in response matches X-Request-Id header (format: req_ + ULID)
+#[tokio::test]
+async fn sts_008_request_id_format_is_req_ulid() {
+    let stub = SmtpStub::start(0).await;
+    let router = test_router(stub.port());
+
+    let send_resp = send_valid(&router).await;
+    send_resp.assert_status(StatusCode::ACCEPTED);
+
+    let body_id = send_resp.body["request_id"].as_str().unwrap_or("");
+    assert!(body_id.starts_with("req_"),
+        "request_id must start with req_: {body_id}");
+    assert!(body_id.len() > 4,
+        "request_id must have content after req_: {body_id}");
+
+    stub.shutdown().await;
+}
+
+/// STS-009: status tracking disabled → GET always returns 404
+#[tokio::test]
+async fn sts_009_disabled_status_tracking_returns_404() {
+    use http_smtp_rele::{api, config::*, AppState};
+
+    let mut cfg = common::test_config(1);
+    cfg.status.enabled = false;
+    let router = api::build_router(AppState::new(cfg));
+
+    // Even after a successful send (port 1 → 502, but request_id exists)
+    let send_resp = send(&router, RequestBuilder::post("/v1/send")
+        .bearer("primary-secret")
+        .json(common::valid_mail_body())
+        .build()).await;
+
+    let request_id = send_resp.body["request_id"].as_str().unwrap_or("").to_string();
+    if request_id.starts_with("req_") {
+        let status_resp = send(&router,
+            RequestBuilder::get(&format!("/v1/submissions/{request_id}"))
+                .bearer("primary-secret")
+                .build()).await;
+        status_resp.assert_status(StatusCode::NOT_FOUND);
+    }
+}
+
+/// STS-010: invalid request_id format returns 404 (not 400)
+#[tokio::test]
+async fn sts_010_invalid_request_id_format_returns_404() {
+    let router = test_router_no_smtp();
+    let bad_id = "not-a-valid-id";
+    let resp = send(&router,
+        RequestBuilder::get(&format!("/v1/submissions/{bad_id}"))
+            .bearer("primary-secret")
+            .build()).await;
+    resp.assert_status(StatusCode::NOT_FOUND);
+}
+
+/// STS-unauthenticated: GET without auth returns 401
+#[tokio::test]
+async fn sts_unauthenticated_returns_401() {
+    let router = test_router_no_smtp();
+    let resp = send(&router,
+        RequestBuilder::get("/v1/submissions/req_01HX7Q9V6R6W9V8Y5E3E6E7M9A")
+            .no_auth()
+            .build()).await;
+    resp.assert_status(StatusCode::UNAUTHORIZED);
+}

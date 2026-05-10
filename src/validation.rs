@@ -516,6 +516,7 @@ mod tests {
                 level: "info".into(),
                 mask_recipient: false,
             },
+            status: Default::default(),
         }
     }
 

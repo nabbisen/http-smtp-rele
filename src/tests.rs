@@ -122,6 +122,7 @@ fn test_config() -> AppConfig {
             level: "error".into(),  // suppress output during tests
             mask_recipient: true,
         },
+        status: Default::default(),
     }
 }
 

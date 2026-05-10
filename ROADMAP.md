@@ -50,10 +50,18 @@ Core HTTP-to-SMTP relay with security hardening.
 - Prometheus: auth failure and rate limit counters wired to middleware layers
 - `reply_to` array support (multiple Reply-To addresses)
 
-## v0.6 — Planned
+## v0.6.0 — Shipped (2026-05-10)
 
 - OpenBSD SIGHUP reload with `rpath` pledge re-application window
 - Bulk send endpoint (`POST /v1/send-bulk`) with per-message parallelism cap
 - Webhook delivery: `POST /v1/send` webhook mode (HTTP instead of SMTP)
 - Per-key logging mask policy (`mask_recipient` override per API key)
 - Admin `GET /v1/keys` read-only key status endpoint
+
+## v0.7 — Planned
+
+- RFC 088 implementation: SQLite persistent status store
+- RFC 089 implementation: Prometheus metrics for status store
+- OpenBSD SIGHUP reload with `rpath` pledge re-application window
+- Admin `GET /v1/keys` read-only key status endpoint
+- Per-key logging mask policy (`mask_recipient` override per API key)

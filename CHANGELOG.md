@@ -35,6 +35,80 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [0.6.0] — 2026-05-10
+
+### Theme: Submission Status Tracking
+
+This release adds **Submission Status Tracking** — the ability to query what
+`http-smtp-rele` observed during request handling and SMTP submission.
+This is not asynchronous mail delivery: `POST /v1/send` remains synchronous.
+The status store records metadata only; it never stores mail body, subject,
+full recipient addresses, or credentials.
+
+### Added
+
+**`RequestId` newtype — breaking change (RFC 036/086)**
+- `request_id` format changed from UUID v4 to `req_` + ULID (e.g. `req_01HX...`)
+- Clients must treat `request_id` as an opaque string
+- `X-Request-Id` response header now uses the new format
+- `src/request_id.rs`: `Display`, `FromStr`, `Serialize`, `Deserialize`, `Clone`, `Eq`, `Hash`
+
+**Submission Status API (RFC 036)**
+- `GET /v1/submissions/{request_id}` — metadata-only status lookup
+- Same API key required; other keys receive 404 (not 403) to prevent enumeration
+- Returns: `status`, `code`, `recipient_domains`, `recipient_count`, timestamps
+- 404 for: unknown, expired, different-key, or invalid format `request_id`
+
+**StatusStore abstraction (RFC 086)**
+- `StatusStore` trait: `put / update_status / get / expire_old_records / reload_config`
+- `SubmissionStatus`: `received → smtp_submission_started → smtp_accepted / smtp_failed / rejected`
+- Terminal states (`rejected`, `smtp_accepted`, `smtp_failed`) cannot be overwritten
+- `ErrorCode` enum unified with HTTP error response codes
+- `Domain` newtype — stores domain only, never full recipient address
+- `recipient_domains: Vec<Domain>` — deduplicated and sorted
+
+**In-memory StatusStore (RFC 087)**
+- `InMemoryStatusStore` — `RwLock<HashMap>`, thread-safe
+- Hybrid TTL cleanup: lazy expiry on `get()` + background task every `cleanup_interval_seconds`
+- `max_records` eviction: expired first, then oldest by `created_at`
+- `NoopStatusStore` — used when `enabled = false`
+- `[status].reload_config()` — SIGHUP updates `ttl_seconds`, `max_records`, `cleanup_interval`
+- On restart: all records cleared (documented behaviour)
+- OpenBSD: no additional pledge promises required
+
+**`[status]` configuration section (RFC 087)**
+```toml
+[status]
+enabled                  = true
+store                    = "memory"
+ttl_seconds              = 3600
+max_records              = 10000
+cleanup_interval_seconds = 60
+```
+SIGHUP-reloadable: `ttl_seconds`, `max_records`, `cleanup_interval_seconds`
+Restart required: `enabled`, `store`
+
+**Status store write integration in `send_mail` (RFC 086/087)**
+- Status records created after auth + rate limit pass (`key_id` is known)
+- `received` → `smtp_submission_started` → `smtp_accepted` / `smtp_failed`
+- Validation or rate limit failures: `rejected` with `ErrorCode`
+- Pre-auth rejections have `X-Request-Id` header but no status record
+
+**Persistent status store design (RFC 088, not implemented)**
+- SQLite and Redis/Valkey candidate designs documented
+- Single text/JSON file explicitly rejected as primary status store
+- Deferred to v0.7+
+
+### Changed
+
+- `request_id` format: UUID v4 → `req_` + ULID (breaking)
+- `AppState` gains `status_store: Arc<dyn StatusStore>` field
+- `AppState::reload_config()` now also calls `status_store.reload_config()`
+- Background status cleanup task spawned in `crates/cli/src/main.rs`
+- Dependencies added: `ulid = "1"`, `chrono = "0.4"`, `async-trait = "0.1"`
+
+---
+
 ## [0.5.0] — 2026-05-10
 
 ### Added
@@ -161,6 +235,80 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `security::RuntimeMode` extended with `SendmailPipe { pipe_command }` variant
 - `MailRequest.to`: `String` → `Recipients` (custom deserializer accepting both forms)
 - `ValidatedMailRequest.to`: `String` → `Vec<String>`
+
+---
+
+## [0.6.0] — 2026-05-10
+
+### Theme: Submission Status Tracking
+
+This release adds **Submission Status Tracking** — the ability to query what
+`http-smtp-rele` observed during request handling and SMTP submission.
+This is not asynchronous mail delivery: `POST /v1/send` remains synchronous.
+The status store records metadata only; it never stores mail body, subject,
+full recipient addresses, or credentials.
+
+### Added
+
+**`RequestId` newtype — breaking change (RFC 036/086)**
+- `request_id` format changed from UUID v4 to `req_` + ULID (e.g. `req_01HX...`)
+- Clients must treat `request_id` as an opaque string
+- `X-Request-Id` response header now uses the new format
+- `src/request_id.rs`: `Display`, `FromStr`, `Serialize`, `Deserialize`, `Clone`, `Eq`, `Hash`
+
+**Submission Status API (RFC 036)**
+- `GET /v1/submissions/{request_id}` — metadata-only status lookup
+- Same API key required; other keys receive 404 (not 403) to prevent enumeration
+- Returns: `status`, `code`, `recipient_domains`, `recipient_count`, timestamps
+- 404 for: unknown, expired, different-key, or invalid format `request_id`
+
+**StatusStore abstraction (RFC 086)**
+- `StatusStore` trait: `put / update_status / get / expire_old_records / reload_config`
+- `SubmissionStatus`: `received → smtp_submission_started → smtp_accepted / smtp_failed / rejected`
+- Terminal states (`rejected`, `smtp_accepted`, `smtp_failed`) cannot be overwritten
+- `ErrorCode` enum unified with HTTP error response codes
+- `Domain` newtype — stores domain only, never full recipient address
+- `recipient_domains: Vec<Domain>` — deduplicated and sorted
+
+**In-memory StatusStore (RFC 087)**
+- `InMemoryStatusStore` — `RwLock<HashMap>`, thread-safe
+- Hybrid TTL cleanup: lazy expiry on `get()` + background task every `cleanup_interval_seconds`
+- `max_records` eviction: expired first, then oldest by `created_at`
+- `NoopStatusStore` — used when `enabled = false`
+- `[status].reload_config()` — SIGHUP updates `ttl_seconds`, `max_records`, `cleanup_interval`
+- On restart: all records cleared (documented behaviour)
+- OpenBSD: no additional pledge promises required
+
+**`[status]` configuration section (RFC 087)**
+```toml
+[status]
+enabled                  = true
+store                    = "memory"
+ttl_seconds              = 3600
+max_records              = 10000
+cleanup_interval_seconds = 60
+```
+SIGHUP-reloadable: `ttl_seconds`, `max_records`, `cleanup_interval_seconds`
+Restart required: `enabled`, `store`
+
+**Status store write integration in `send_mail` (RFC 086/087)**
+- Status records created after auth + rate limit pass (`key_id` is known)
+- `received` → `smtp_submission_started` → `smtp_accepted` / `smtp_failed`
+- Validation or rate limit failures: `rejected` with `ErrorCode`
+- Pre-auth rejections have `X-Request-Id` header but no status record
+
+**Persistent status store design (RFC 088, not implemented)**
+- SQLite and Redis/Valkey candidate designs documented
+- Single text/JSON file explicitly rejected as primary status store
+- Deferred to v0.7+
+
+### Changed
+
+- `request_id` format: UUID v4 → `req_` + ULID (breaking)
+- `AppState` gains `status_store: Arc<dyn StatusStore>` field
+- `AppState::reload_config()` now also calls `status_store.reload_config()`
+- Background status cleanup task spawned in `crates/cli/src/main.rs`
+- Dependencies added: `ulid = "1"`, `chrono = "0.4"`, `async-trait = "0.1"`
 
 ---
 

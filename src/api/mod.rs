@@ -11,33 +11,29 @@ use axum::{
     routing::get,
     Router,
 };
+
 use tower_http::{timeout::TimeoutLayer, trace::TraceLayer};
 
-use crate::AppState;
+use crate::{AppState, RequestId};
 
 pub mod health;
 pub mod metrics_handler;
 pub mod send;
+pub mod submissions;
 
 // ---------------------------------------------------------------------------
 // X-Request-Id middleware (RFC 035)
 // ---------------------------------------------------------------------------
 
-/// Axum middleware that injects an `X-Request-Id` header on every response.
-///
-/// The UUID is generated once per request and added to the response header.
-/// Handlers access it via the `ReqId` extension if they need to echo it in
-/// the response body.
+/// Axum middleware that generates a `RequestId` (req_ + ULID) per request,
+/// stores it as a request Extension for handlers, and injects `X-Request-Id`
+/// into the response header (RFC 035, RFC 036).
 async fn request_id_layer(mut req: axum::http::Request<axum::body::Body>, next: Next) -> Response {
-    let request_id = uuid::Uuid::new_v4().to_string();
-    // Store in a request header so handlers can read it via HeaderMap extractor.
-    // Using an internal header name avoids conflict with client-supplied headers.
-    if let Ok(val) = HeaderValue::from_str(&request_id) {
-        req.headers_mut().insert("x-internal-request-id", val.clone());
-    }
+    let request_id = RequestId::new();
+    let header_val = request_id.to_string();
+    req.extensions_mut().insert(request_id);
     let mut resp = next.run(req).await;
-    // Inject into the response header so clients can correlate with server logs.
-    if let Ok(val) = HeaderValue::from_str(&request_id) {
+    if let Ok(val) = HeaderValue::from_str(&header_val) {
         resp.headers_mut().insert("x-request-id", val);
     }
     resp
@@ -46,6 +42,26 @@ async fn request_id_layer(mut req: axum::http::Request<axum::body::Body>, next: 
 // ---------------------------------------------------------------------------
 // Router construction
 // ---------------------------------------------------------------------------
+
+/// Axum extractor that reads `RequestId` set by `request_id_layer`, or generates a
+/// new one as a fallback (ensures tests that bypass the middleware still work).
+pub struct ExtractRequestId(pub crate::RequestId);
+
+impl<S: Send + Sync> axum::extract::FromRequestParts<S> for ExtractRequestId {
+    type Rejection = std::convert::Infallible;
+
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let id = parts
+            .extensions
+            .get::<crate::RequestId>()
+            .cloned()
+            .unwrap_or_else(crate::RequestId::new);
+        async move { Ok(ExtractRequestId(id)) }
+    }
+}
 
 /// Build the Axum application router with all middleware layers applied.
 pub fn build_router(state: Arc<AppState>) -> Router {
@@ -58,6 +74,7 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .route("/healthz", get(health::healthz))
         .route("/readyz",  get(health::readyz))
         .route("/metrics", get(metrics_handler::metrics_handler))
+        .route("/v1/submissions/{request_id}", get(submissions::get_submission_status))
         .route("/v1/send", axum::routing::post(send::send_mail))
         .layer(middleware::from_fn(request_id_layer))
         .layer(TraceLayer::new_for_http())

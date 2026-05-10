@@ -80,6 +80,34 @@ impl fmt::Display for SecretString {
 // ---------------------------------------------------------------------------
 
 /// Top-level application configuration.
+
+/// Submission status tracking configuration (RFC 086, 087).
+#[derive(Debug, Clone, Deserialize)]
+pub struct StatusConfig {
+    /// Enable status tracking. When false, no records are created.
+    /// Requires restart to change.
+    #[serde(default = "default_status_enabled")]
+    pub enabled: bool,
+    /// Backend: "memory" only in MVP. Requires restart to change.
+    #[serde(default = "default_status_store")]
+    pub store: String,
+    /// Record time-to-live in seconds. SIGHUP-reloadable.
+    #[serde(default = "default_status_ttl_seconds")]
+    pub ttl_seconds: u64,
+    /// Maximum records in store. SIGHUP-reloadable.
+    #[serde(default = "default_status_max_records")]
+    pub max_records: usize,
+    /// Background cleanup interval in seconds. SIGHUP-reloadable.
+    #[serde(default = "default_status_cleanup_interval_seconds")]
+    pub cleanup_interval_seconds: u64,
+}
+
+fn default_status_enabled() -> bool { true }
+fn default_status_store() -> String { "memory".into() }
+fn default_status_ttl_seconds() -> u64 { 3600 }
+fn default_status_max_records() -> usize { 10_000 }
+fn default_status_cleanup_interval_seconds() -> u64 { 60 }
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct AppConfig {
     pub server:     ServerConfig,
@@ -88,6 +116,20 @@ pub struct AppConfig {
     pub smtp:       SmtpConfig,
     pub rate_limit: RateLimitConfig,
     pub logging:    LoggingConfig,
+    #[serde(default)]
+    pub status:     StatusConfig,
+}
+
+impl Default for StatusConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_status_enabled(),
+            store: default_status_store(),
+            ttl_seconds: default_status_ttl_seconds(),
+            max_records: default_status_max_records(),
+            cleanup_interval_seconds: default_status_cleanup_interval_seconds(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]

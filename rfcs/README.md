@@ -46,6 +46,17 @@ No RFCs currently open. All v0.3 items are in `done/`.
 | 503 | [reply\_to Array](./done/503-reply-to-array.md) |
 | 504 | [Prometheus: Full Instrumentation](./done/504-prometheus-full.md) |
 
+### v0.6 Features — Submission Status Tracking
+
+| ID  | Title |
+|-----|-------|
+| 036 | [Submission Status API](./done/036-submission-status-api.md) |
+| 086 | [Submission Status Store Abstraction](./done/086-submission-status-store-abstraction.md) |
+| 087 | [In-memory Submission Status Store](./done/087-in-memory-status-store.md) |
+| 088 | [Persistent Status Store Options](./done/088-persistent-status-store-options.md) |
+| 089 | [Submission Status Store Metrics](./done/089-submission-status-metrics.md) |
+| 106 | [Submission Status API Integration Tests](./done/106-submission-status-integration-tests.md) |
+
 ### T0 — Governance
 
 | ID  | Title | Milestone |
