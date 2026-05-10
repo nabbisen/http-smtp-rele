@@ -7,12 +7,10 @@ mod smtp_stub;
 mod common;
 
 use axum::http::StatusCode;
-use tower::ServiceExt;
 
-use serde_json::json;
 
-use common::{send, send_valid, test_router, test_router_no_smtp, RequestBuilder};
-use smtp_stub::{SmtpStub, StubConfig};
+use common::{send, test_router, test_router_no_smtp, RequestBuilder};
+use smtp_stub::SmtpStub;
 
 
 // RFC 703 — Bulk Send Integration Tests
@@ -91,7 +89,7 @@ async fn bulk_003_empty_array_returns_400() {
 /// BULK-004: array exceeds max_bulk_messages → 400.
 #[tokio::test]
 async fn bulk_004_exceeds_max_messages_returns_400() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
     let mut cfg = common::test_config(1);
     cfg.mail.max_bulk_messages = 2;
     let router = api::build_router(AppState::new(cfg));
@@ -234,7 +232,7 @@ async fn bulk_all_smtp_failed_returns_202_with_rejected() {
 /// RFC-711-01: bulk concurrency setting respected — results stay in index order.
 #[tokio::test]
 async fn bulk_parallelism_results_in_index_order() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
     let stub = SmtpStub::start(0).await;
     let mut cfg = common::test_config(stub.port());
     cfg.smtp.bulk_concurrency = 2; // explicit concurrency cap
@@ -267,7 +265,7 @@ async fn bulk_parallelism_results_in_index_order() {
 /// RFC-711-02: bulk_concurrency = 0 means unlimited (no semaphore deadlock).
 #[tokio::test]
 async fn bulk_concurrency_zero_means_unlimited() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
     let stub = SmtpStub::start(0).await;
     let mut cfg = common::test_config(stub.port());
     cfg.smtp.bulk_concurrency = 0; // unlimited

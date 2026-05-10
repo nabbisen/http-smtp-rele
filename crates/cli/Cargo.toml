@@ -1,6 +1,6 @@
 [package]
 name        = "http-smtp-rele-cli"
-version     = "0.13.0"
+version     = "0.13.1"
 edition     = "2024"
 description = "CLI binary for http-smtp-rele"
 
@@ -10,6 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 http-smtp-rele     = { path = "../.." }
+axum-server        = { version = "0.7", features = ["tls-rustls"], optional = true }
 tokio              = { version = "1", features = ["full"] }
 clap               = { version = "4", features = ["derive"] }
 tracing            = "0.1"
@@ -19,3 +20,9 @@ anyhow             = "1"
 
 [target.'cfg(target_os = "openbsd")'.dependencies]
 libc = "0.2"
+
+[features]
+default = []
+sqlite  = ["http-smtp-rele/sqlite"]
+tls     = ["http-smtp-rele/tls", "dep:axum-server"]
+redis   = ["http-smtp-rele/redis"]

@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Integration test harness for http-smtp-rele.
 //!
 //! Implements RFC 100: provides helpers for building a fully-assembled test

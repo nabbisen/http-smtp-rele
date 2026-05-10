@@ -9,10 +9,9 @@ mod common;
 use axum::http::StatusCode;
 use tower::ServiceExt;
 
-use serde_json::json;
 
 use common::{send, send_valid, test_router, test_router_no_smtp, RequestBuilder};
-use smtp_stub::{SmtpStub, StubConfig};
+use smtp_stub::SmtpStub;
 
 
 // RFC 106 — Submission Status API Integration Tests
@@ -84,9 +83,6 @@ async fn sts_002_validation_failure_status_rejected() {
 /// The status store is updated to smtp_failed; the GET endpoint reflects this.
 #[tokio::test]
 async fn sts_004_smtp_unavailable_status_failed() {
-    use tower::ServiceExt;
-
-
     // Port 1 has no listener
     let router = test_router(1);
 
@@ -206,7 +202,7 @@ async fn sts_008_request_id_format_is_req_ulid() {
 /// STS-009: status tracking disabled → GET always returns 404
 #[tokio::test]
 async fn sts_009_disabled_status_tracking_returns_404() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     cfg.status.enabled = false;
@@ -315,7 +311,7 @@ async fn keys_self_includes_effective_rates() {
 
 #[tokio::test]
 async fn per_key_mask_recipient_none_inherits_global() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
     let mut cfg = common::test_config(1);
     cfg.logging.mask_recipient = false;
     cfg.security.api_keys[0].mask_recipient = None; // inherit
@@ -325,7 +321,7 @@ async fn per_key_mask_recipient_none_inherits_global() {
 
 #[tokio::test]
 async fn per_key_mask_recipient_override_true() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
     let mut cfg = common::test_config(1);
     cfg.logging.mask_recipient = false; // global says no mask
     cfg.security.api_keys[0].mask_recipient = Some(true); // key overrides to mask

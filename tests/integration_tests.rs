@@ -448,7 +448,7 @@ async fn from_address_always_from_config() {
 
 #[tokio::test]
 async fn per_key_burst_override_respected() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     // Key with burst=2; global has burst=50 but key overrides
@@ -472,7 +472,7 @@ async fn per_key_burst_override_respected() {
 
 #[tokio::test]
 async fn per_key_default_rate_distinct_from_ip_rate() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     cfg.rate_limit.per_key_per_min = 600;   // generous per-key default
@@ -497,7 +497,7 @@ async fn per_key_default_rate_distinct_from_ip_rate() {
 
 #[tokio::test]
 async fn per_address_allowlist_permits_listed_address() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     cfg.security.api_keys[0].allowed_recipients = vec!["alice@example.com".into()];
@@ -517,7 +517,7 @@ async fn per_address_allowlist_permits_listed_address() {
 
 #[tokio::test]
 async fn per_address_allowlist_blocks_unlisted_address() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     cfg.security.api_keys[0].allowed_recipients = vec!["alice@example.com".into()];
@@ -537,7 +537,7 @@ async fn per_address_allowlist_blocks_unlisted_address() {
 
 #[tokio::test]
 async fn per_address_empty_list_falls_through_to_domain_policy() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     let mut cfg = common::test_config(1);
     // allowed_recipients is empty — domain policy applies
@@ -664,7 +664,7 @@ async fn multi_recipient_empty_array_rejected() {
 
 #[tokio::test]
 async fn forwarded_header_resolved_when_trusted_proxy() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     // Configure trust for 127.0.0.1 (the test loopback peer)
     let mut cfg = common::test_config(1);
@@ -698,7 +698,7 @@ async fn forwarded_header_resolved_when_trusted_proxy() {
 #[tokio::test]
 async fn arcswap_config_hot_swap_takes_effect_immediately() {
     use http_smtp_rele::{AppState, config::*};
-    use std::sync::Arc;
+    
 
     let cfg = common::test_config(1);
     let state = AppState::new(cfg);
@@ -1050,7 +1050,7 @@ async fn auth_failure_increments_metric() {
 
 #[tokio::test]
 async fn rate_limit_tier_counter_increments() {
-    use http_smtp_rele::{api, config::*, AppState};
+    use http_smtp_rele::{api, AppState};
 
     // Tiny burst to trigger rate limit quickly
     let mut cfg = common::test_config(1);
